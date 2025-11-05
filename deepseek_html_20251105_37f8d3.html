@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>متتبع تراخيص السيارات - النظام المتكامل</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <!-- شاشة البداية -->
+    <div class="container" id="welcomeScreen">
+        <div class="welcome-card">
+            <div class="logo">
+                <i class="fas fa-car-alt"></i>
+                <h1>النظام المتكامل</h1>
+            </div>
+            
+            <div class="welcome-text">
+                <h2>مرحباً بك!</h2>
+                <p>إدارة تراخيص السيارات + كشف حساب المصاريف + نظام العهدة</p>
+            </div>
+
+            <div class="features">
+                <div class="feature-item">
+                    <i class="fas fa-file-invoice-dollar"></i>
+                    <span>كشف حساب مفصل</span>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-balance-scale"></i>
+                    <span>نظام العهدة (دائن/مدين)</span>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-chart-line"></i>
+                    <span>تقارير مالية</span>
+                </div>
+            </div>
+
+            <div class="auth-buttons">
+                <button class="btn btn-primary" onclick="showLogin()">
+                    <i class="fas fa-sign-in-alt"></i>
+                    تسجيل الدخول
+                </button>
+                <button class="btn btn-secondary" onclick="showRegister()">
+                    <i class="fas fa-user-plus"></i>
+                    إنشاء حساب
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- شاشة تسجيل الدخول -->
+    <div class="container" id="loginScreen" style="display: none;">
+        <div class="auth-card">
+            <div class="back-btn" onclick="showWelcome()">
+                <i class="fas fa-arrow-right"></i>
+            </div>
+            
+            <h2>تسجيل الدخول</h2>
+            
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="loginEmail">البريد الإلكتروني</label>
+                    <input type="email" id="loginEmail" required>
+                    <i class="fas fa-envelope input-icon"></i>
+                </div>
+                
+                <div class="form-group">
+                    <label for="loginPassword">كلمة المرور</label>
+                    <input type="password" id="loginPassword" required>
+                    <i class="fas fa-lock input-icon"></i>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-full">
+                    <i class="fas fa-sign-in-alt"></i>
+                    دخول
+                </button>
+            </form>
+
+            <div class="auth-link">
+                <p>ليس لديك حساب؟ <a href="#" onclick="showRegister()">إنشاء حساب جديد</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- شاشة إنشاء حساب -->
+    <div class="container" id="registerScreen" style="display: none;">
+        <div class="auth-card">
+            <div class="back-btn" onclick="showWelcome()">
+                <i class="fas fa-arrow-right"></i>
+            </div>
+            
+            <h2>إنشاء حساب جديد</h2>
+            
+            <form id="registerForm">
+                <div class="form-group">
+                    <label for="registerName">الاسم الكامل</label>
+                    <input type="text" id="registerName" required>
+                    <i class="fas fa-user input-icon"></i>
+                </div>
+                
+                <div class="form-group">
+                    <label for="registerEmail">البريد الإلكتروني</label>
+                    <input type="email" id="registerEmail" required>
+                    <i class="fas fa-envelope input-icon"></i>
+                </div>
+                
+                <div class="form-group">
+                    <label for="registerPassword">كلمة المرور</label>
+                    <input type="password" id="registerPassword" required>
+                    <i class="fas fa-lock input-icon"></i>
+                </div>
+
+                <div class="form-group">
+                    <label for="registerPhone">رقم الهاتف</label>
+                    <input type="tel" id="registerPhone">
+                    <i class="fas fa-phone input-icon"></i>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-full">
+                    <i class="fas fa-user-plus"></i>
+                    إنشاء حساب
+                </button>
+            </form>
+
+            <div class="auth-link">
+                <p>لديك حساب بالفعل؟ <a href="#" onclick="showLogin()">تسجيل الدخول</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- لوحة التحكم الرئيسية -->
+    <div class="dashboard" id="dashboard" style="display: none;">
+        <!-- الهيدر -->
+        <header class="header">
+            <div class="header-content">
+                <button class="menu-btn" onclick="toggleSidebar()">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <h1>النظام المتكامل</h1>
+                <div class="user-menu">
+                    <span id="userName">مستخدم</span>
+                    <button class="logout-btn" onclick="logout()">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- الشريط الجانبي -->
+        <div class="sidebar" id="sidebar">
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" onclick="showSection('overview')">
+                    <i class="fas fa-home"></i>
+                    <span>نظرة عامة</span>
+                </a>
+                <a href="#" class="nav-item" onclick="showSection('cars')">
+                    <i class="fas fa-car"></i>
+                    <span>إدارة السيارات</span>
+                </a>
+                <a href="#" class="nav-item" onclick="showSection('expenses')">
+                    <i class="fas fa-file-invoice-dollar"></i>
+                    <span>كشف حساب المصاريف</span>
+                </a>
+                <a href="#" class="nav-item" onclick="showSection('amanah')">
+                    <i class="fas fa-balance-scale"></i>
+                    <span>نظام العهدة</span>
+                </a>
+                <a href="#" class="nav-item" onclick="showSection('reports')">
+                    <i class="fas fa-chart-bar"></i>
+                    <span>التقارير المالية</span>
+                </a>
+                <a href="#" class="nav-item" onclick="showSection('settings')">
+                    <i class="fas fa-cog"></i>
+                    <span>الإعدادات</span>
+                </a>
+            </nav>
+        </div>
+
+        <!-- المحتوى الرئيسي -->
+        <main class="main-content" id="mainContent">
+            <!-- قسم النظرة العامة -->
+            <div class="section" id="overviewSection">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-car"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="totalCars">0</h3>
+                            <p>إجمالي السيارات</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon warning">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="expiringSoon">0</h3>
+                            <p>تنتهي قريباً</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-money-bill-wave"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="totalExpenses">0</h3>
+                            <p>إجمالي المصاريف</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-balance-scale"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="amanahBalance">0</h3>
+                            <p>رصيد العهدة</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="recent-activities">
+                    <div class="activity-section">
+                        <h2>آخر المصاريف</h2>
+                        <div id="recentExpenses" class="activity-list">
+                            <!-- سيتم ملؤها بالبيانات -->
+                        </div>
+                    </div>
+                    
+                    <div class="activity-section">
+                        <h2>آخر حركات العهدة</h2>
+                        <div id="recentAmanah" class="activity-list">
+                            <!-- سيتم ملؤها بالبيانات -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- قسم إدارة السيارات -->
+            <div class="section" id="carsSection" style="display: none;">
+                <div class="section-header">
+                    <h2>إدارة السيارات</h2>
+                    <button class="btn btn-primary" onclick="showAddCarModal()">
+                        <i class="fas fa-plus"></i>
+                        إضافة سيارة
+                    </button>
+                </div>
+                
+                <div class="cars-grid" id="carsGrid">
+                    <!-- سيتم ملؤها بالبيانات -->
+                </div>
+            </div>
+
+            <!-- قسم كشف حساب المصاريف -->
+            <div class="section" id="expensesSection" style="display: none;">
+                <div class="section-header">
+                    <h2>كشف حساب مصاريف التراخيص</h2>
+                    <button class="btn btn-primary" onclick="showAddExpenseModal()">
+                        <i class="fas fa-plus"></i>
+                        إضافة مصروف
+                    </button>
+                </div>
+
+                <div class="filters">
+                    <select id="expenseCarFilter" onchange="filterExpenses()">
+                        <option value="">جميع السيارات</option>
+                    </select>
+                    <select id="expenseMonthFilter" onchange="filterExpenses()">
+                        <option value="">جميع الأشهر</option>
+                    </select>
+                    <input type="number" id="expenseYearFilter" placeholder="السنة" onchange="filterExpenses()">
+                </div>
+
+                <div class="expenses-summary">
+                    <div class="summary-card">
+                        <h3>إجمالي المصاريف</h3>
+                        <span id="totalExpensesAmount">0 ريال</span>
+                    </div>
+                    <div class="summary-card">
+                        <h3>المصاريف هذا الشهر</h3>
+                        <span id="monthlyExpenses">0 ريال</span>
+                    </div>
+                    <div class="summary-card">
+                        <h3>متوسط المصاريف</h3>
+                        <span id="averageExpenses">0 ريال</span>
+                    </div>
+                </div>
+
+                <div class="expenses-table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>التاريخ</th>
+                                <th>السيارة</th>
+                                <th>نوع المصروف</th>
+                                <th>المبلغ</th>
+                                <th>الوصف</th>
+                                <th>الإجراءات</th>
+                            </tr>
+                        </thead>
+                        <tbody id="expensesTable">
+                            <!-- سيتم ملؤها بالبيانات -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- قسم نظام العهدة -->
+            <div class="section" id="amanahSection" style="display: none;">
+                <div class="section-header">
+                    <h2>نظام العهدة (دائن/مدين)</h2>
+                    <div class="action-buttons">
+                        <button class="btn btn-success" onclick="showAddAmanahModal('credit')">
+                            <i class="fas fa-plus-circle"></i>
+                            إضافة دائن
+                        </button>
+                        <button class="btn btn-warning" onclick="showAddAmanahModal('debit')">
+                            <i class="fas fa-minus-circle"></i>
+                            إضافة مدين
+                        </button>
+                    </div>
+                </div>
+
+                <div class="amanah-summary">
+                    <div class="summary-card large">
+                        <h3>الرصيد الحالي</h3>
+                        <span id="currentBalance" class="balance-amount">0 ريال</span>
+                    </div>
+                    <div class="summary-card">
+                        <h3>إجمالي الدائن</h3>
+                        <span id="totalCredit" class="credit-amount">0 ريال</span>
+                    </div>
+                    <div class="summary-card">
+                        <h3>إجمالي المدين</h3>
+                        <span id="totalDebit" class="debit-amount">0 ريال</span>
+                    </div>
+                </div>
+
+                <div class="filters">
+                    <select id="amanahTypeFilter" onchange="filterAmanah()">
+                        <option value="">جميع الحركات</option>
+                        <option value="credit">دائن فقط</option>
+                        <option value="debit">مدين فقط</option>
+                    </select>
+                    <input type="month" id="amanahMonthFilter" onchange="filterAmanah()">
+                </div>
+
+                <div class="amanah-table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>التاريخ</th>
+                                <th>النوع</th>
+                                <th>المبلغ</th>
+                                <th>الوصف</th>
+                                <th>الرصيد بعد العملية</th>
+                                <th>الإجراءات</th>
+                            </tr>
+                        </thead>
+                        <tbody id="amanahTable">
+                            <!-- سيتم ملؤها بالبيانات -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- قسم التقارير المالية -->
+            <div class="section" id="reportsSection" style="display: none;">
+                <div class="section-header">
+                    <h2>التقارير المالية</h2>
+                    <button class="btn btn-primary" onclick="generateReport()">
+                        <i class="fas fa-download"></i>
+                        تصدير التقرير
+                    </button>
+                </div>
+
+                <div class="reports-grid">
+                    <div class="report-card">
+                        <h3>تقرير المصاريف الشهري</h3>
+                        <div id="monthlyExpensesChart" class="chart-placeholder">
+                            <!-- سيتم إضافة الرسم البياني -->
+                        </div>
+                    </div>
+                    
+                    <div class="report-card">
+                        <h3>توزيع المصاريف</h3>
+                        <div id="expensesDistributionChart" class="chart-placeholder">
+                            <!-- سيتم إضافة الرسم البياني -->
+                        </div>
+                    </div>
+                    
+                    <div class="report-card">
+                        <h3>حركة العهدة</h3>
+                        <div id="amanahFlowChart" class="chart-placeholder">
+                            <!-- سيتم إضافة الرسم البياني -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="detailed-report">
+                    <h3>كشف حساب مفصل</h3>
+                    <div id="detailedReportTable" class="report-table">
+                        <!-- سيتم ملؤها بالبيانات -->
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- مودال إضافة سيارة -->
+    <div class="modal" id="addCarModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>إضافة سيارة جديدة</h3>
+                <button class="close-btn" onclick="closeAddCarModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="addCarForm">
+                <div class="form-group">
+                    <label for="carPlate">رقم اللوحة</label>
+                    <input type="text" id="carPlate" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="carModel">الموديل</label>
+                    <input type="text" id="carModel" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="carYear">سنة الصنع</label>
+                    <input type="number" id="carYear" min="1990" max="2024" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="licenseExpiry">تاريخ انتهاء الرخصة</label>
+                    <input type="date" id="licenseExpiry" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="licenseCost">تكلفة الرخصة (ريال)</label>
+                    <input type="number" id="licenseCost" required>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddCarModal()">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">حفظ</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- مودال إضافة مصروف -->
+    <div class="modal" id="addExpenseModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>إضافة مصروف جديد</h3>
+                <button class="close-btn" onclick="closeAddExpenseModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="addExpenseForm">
+                <div class="form-group">
+                    <label for="expenseCar">السيارة</label>
+                    <select id="expenseCar" required>
+                        <option value="">اختر السيارة</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="expenseType">نوع المصروف</label>
+                    <select id="expenseType" required>
+                        <option value="ترخيص">ترخيص</option>
+                        <option value="صيانة">صيانة</option>
+                        <option value="فحص فني">فحص فني</option>
+                        <option value="تأمين">تأمين</option>
+                        <option value="أخرى">أخرى</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="expenseAmount">المبلغ (ريال)</label>
+                    <input type="number" id="expenseAmount" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="expenseDate">تاريخ المصروف</label>
+                    <input type="date" id="expenseDate" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="expenseDescription">وصف المصروف</label>
+                    <textarea id="expenseDescription" rows="3"></textarea>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddExpenseModal()">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">حفظ</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- مودال إضافة حركة عهدة -->
+    <div class="modal" id="addAmanahModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="amanahModalTitle">إضافة حركة عهدة</h3>
+                <button class="close-btn" onclick="closeAddAmanahModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="addAmanahForm">
+                <input type="hidden" id="amanahType">
+                
+                <div class="form-group">
+                    <label for="amanahAmount">المبلغ (ريال)</label>
+                    <input type="number" id="amanahAmount" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="amanahDate">تاريخ الحركة</label>
+                    <input type="date" id="amanahDate" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="amanahDescription">وصف الحركة</label>
+                    <textarea id="amanahDescription" rows="3" required></textarea>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddAmanahModal()">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">حفظ</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
