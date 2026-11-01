@@ -1,7 +1,7 @@
 import { FONTS, isArabic, fontCss } from './fonts.ts';
 
 // Scene drawing shared by the editor canvas and the exporter. Text sizes and positions are fractions of the canvas, so they scale to any size.
-export interface TextLayer { id: string; text: string; font: string; size: number; color: string; cx: number; cy: number }
+export interface TextLayer { id: string; text: string; font: string; size: number; color: string; cx: number; cy: number; rotation?: number; visible?: boolean }
 export type Background = { kind: 'transparent' } | { kind: 'color'; color: string } | { kind: 'image'; bitmap: ImageBitmap };
 export interface Box { id: string; x0: number; y0: number; x1: number; y1: number }
 
@@ -35,14 +35,20 @@ export function drawScene(
   if (cut) ctx.drawImage(cut, 0, 0, W, H);
   const boxes: Box[] = [];
   for (const t of texts) {
-    const px = t.size * W, lh = px * 1.3, lines = t.text.split('\n');
+    if (t.visible === false) continue;
+    const px = t.size * W, lh = px * 1.3, lines = t.text.split('\\n');
     ctx.font = fontCss(t.font, px);
     ctx.fillStyle = t.color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.direction = isArabic(t.text) ? 'rtl' : 'ltr';
-    const top = t.cy * H - ((lines.length - 1) * lh) / 2;
+    const cx = t.cx * W, cy = t.cy * H, top = -((lines.length - 1) * lh) / 2;
     let maxW = 1;
-    lines.forEach((l, i) => { ctx.fillText(l, t.cx * W, top + i * lh); maxW = Math.max(maxW, ctx.measureText(l).width); });
-    boxes.push({ id: t.id, x0: t.cx * W - maxW / 2, x1: t.cx * W + maxW / 2, y0: top - lh / 2, y1: top + (lines.length - 1) * lh + lh / 2 });
+    lines.forEach((line) => { maxW = Math.max(maxW, ctx.measureText(line).width); });
+    const halfW = maxW / 2, halfH = (lines.length * lh) / 2, angle = (t.rotation ?? 0) * Math.PI / 180;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(angle);
+    lines.forEach((line, i) => ctx.fillText(line, 0, top + i * lh));
+    ctx.restore();
+    const corners = [[-halfW,-halfH],[halfW,-halfH],[halfW,halfH],[-halfW,halfH]].map(([x,y]) => ({ x: cx + x*Math.cos(angle)-y*Math.sin(angle), y: cy + x*Math.sin(angle)+y*Math.cos(angle) }));
+    boxes.push({ id: t.id, x0: Math.min(...corners.map(q=>q.x)), x1: Math.max(...corners.map(q=>q.x)), y0: Math.min(...corners.map(q=>q.y)), y1: Math.max(...corners.map(q=>q.y)) });
   }
   return boxes;
 }
