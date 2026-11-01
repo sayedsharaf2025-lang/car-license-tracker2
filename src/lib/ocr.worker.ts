@@ -27,7 +27,7 @@ self.onmessage = async (e: MessageEvent) => {
     }
     if (!rec) rec = await ort.InferenceSession.create(new Uint8Array(await bytes('/models/ocr_rec.onnx', 100_000)), { executionProviders: ['wasm'] });
     if (!chars.length) chars = buildChars(new TextDecoder().decode(await bytes('/models/ocr_dict.txt', 500)));
-    const d = detPreprocess(rgba, w, h);
+    const d = detPreprocess(rgba, w, h, 1280);
     const dout = await det.run({ [det.inputNames[0]]: new ort.Tensor('float32', d.data, [1, 3, d.dh, d.dw]) });
     const prob = dout[det.outputNames[0]].data as Float32Array;
     let lines: Rect[] = groupLines(detBoxes(prob, d.dw, d.dh)).map((r) => ({ x0: (r.x0 * w) / d.dw, x1: (r.x1 * w) / d.dw, y0: (r.y0 * h) / d.dh, y1: (r.y1 * h) / d.dh }));
