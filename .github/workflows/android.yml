@@ -22,14 +22,18 @@ jobs:
             curl -fL --retry 3 -o public/models/u2netp.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx
           fi
           echo "8e83ca70e441ab06c318d82300c84806  public/models/u2netp.onnx" | md5sum -c -
-      - name: Get the text-reading models (about 10 MB, optional - the app still builds without them)
-        continue-on-error: true
+      - name: Download the offline Arabic OCR language pack (Arabic, Persian and Urdu)
         run: |
+          mkdir -p public/models
           cd public/models
-          [ -s ocr_det.onnx ]  || curl -fL --retry 3 -o ocr_det.onnx  https://huggingface.co/monkt/paddleocr-onnx/resolve/main/detection/v3/det.onnx
-          [ -s ocr_rec.onnx ]  || curl -fL --retry 3 -o ocr_rec.onnx  https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/arabic/rec.onnx
-          [ -s ocr_dict.txt ]  || curl -fL --retry 3 -o ocr_dict.txt  https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/arabic/dict.txt
-          ls -l
+          [ -s ocr_det.onnx ] || curl -fL --retry 3 --retry-all-errors -o ocr_det.onnx https://huggingface.co/monkt/paddleocr-onnx/resolve/main/detection/v3/det.onnx
+          [ -s ocr_rec.onnx ] || curl -fL --retry 3 --retry-all-errors -o ocr_rec.onnx https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/arabic/rec.onnx
+          [ -s ocr_dict.txt ] || curl -fL --retry 3 --retry-all-errors -o ocr_dict.txt https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/arabic/dict.txt
+          test "$(stat -c%s ocr_det.onnx)" -gt 100000
+          test "$(stat -c%s ocr_rec.onnx)" -gt 100000
+          test "$(wc -l < ocr_dict.txt)" -gt 500
+          printf '{"model":"PP-OCR Arabic","languages":["ar","fa","ur"],"offline":true}\n' > ocr-languages.json
+          ls -lh ocr_det.onnx ocr_rec.onnx ocr_dict.txt ocr-languages.json
       - run: npm install
       - name: Type check (reports errors, does not block the APK)
         run: npm run typecheck
