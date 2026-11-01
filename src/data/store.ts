@@ -30,6 +30,8 @@ const STORE = 'projects';
 const all = new Map<string, Project>();
 let currentId: string | null = null;
 let dbPromise: Promise<IDBDatabase> | null = null;
+const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const saveQueues = new Map<string, Promise<void>>();
 
 function db(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
@@ -135,6 +137,14 @@ export const projects = {
   open(id: string): Project | null { if (all.has(id)) currentId=id; return all.get(id) ?? null; },
   touch(p: Project): void {
     p.updatedAt = Date.now();
-    void persist(p).catch((error) => console.warn('Project autosave failed', error));
+    const old = saveTimers.get(p.id);
+    if (old) clearTimeout(old);
+    saveTimers.set(p.id, setTimeout(() => {
+      saveTimers.delete(p.id);
+      const previous = saveQueues.get(p.id) ?? Promise.resolve();
+      const next = previous.catch(() => undefined).then(() => persist(p));
+      saveQueues.set(p.id, next);
+      void next.catch((error) => console.warn('Project autosave failed', error));
+    }, 450));
   },
 };
