@@ -57,3 +57,7 @@ input[type="color"] { min-width: var(--tap-min); min-height: var(--tap-min); bor
 [hidden] { display: none !important; }
 .fontrow { flex-wrap: nowrap; overflow-x: auto; padding-bottom: var(--space-1); }
 .fontrow .chip { flex: none; }
+.layer-row { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.layer-row .chip:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-row .chip { min-height: 36px; padding-inline: 10px; font-size: var(--text-xs); }
+.sheet h3 { margin: var(--space-2) 0 0; font-size: var(--text-sm); }
