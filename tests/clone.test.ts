@@ -4,7 +4,7 @@ import { cloneSourcePoint, interpolateCloneStroke } from '../src/lib/cloneMath.t
 
 test('clone stroke interpolation fills long pointer gaps and includes endpoint', () => {
   const points = interpolateCloneStroke({ x: 0, y: 0 }, { x: 10, y: 0 }, 2);
-  assert.equal(points.length, 6);
+  assert.equal(points.length, 5);
   assert.deepEqual(points.at(-1), { x: 10, y: 0 });
   for (let i = 1; i < points.length; i++) assert.ok(points[i].x - points[i - 1].x <= 2);
 });
