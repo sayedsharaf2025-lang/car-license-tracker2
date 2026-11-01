@@ -1,7 +1,7 @@
 import { FONTS, isArabic, fontCss } from './fonts.ts';
 
 // Scene drawing shared by the editor canvas and the exporter. Text sizes and positions are fractions of the canvas, so they scale to any size.
-export interface TextLayer { id: string; text: string; font: string; size: number; color: string; cx: number; cy: number; rotation?: number; visible?: boolean }
+export interface TextLayer { id: string; text: string; font: string; size: number; color: string; cx: number; cy: number; rotation?: number; visible?: boolean; align?: 'left' | 'center' | 'right'; shadowColor?: string; shadowBlur?: number; strokeColor?: string; strokeWidth?: number }
 export type Background = { kind: 'transparent' } | { kind: 'color'; color: string } | { kind: 'image'; bitmap: ImageBitmap };
 export interface Box { id: string; x0: number; y0: number; x1: number; y1: number }
 
@@ -39,13 +39,19 @@ export function drawScene(
     const px = t.size * W, lh = px * 1.3, lines = t.text.split('\\n');
     ctx.font = fontCss(t.font, px);
     ctx.fillStyle = t.color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = t.shadowColor ?? 'transparent'; ctx.shadowBlur = t.shadowBlur ?? 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
     ctx.direction = isArabic(t.text) ? 'rtl' : 'ltr';
     const cx = t.cx * W, cy = t.cy * H, top = -((lines.length - 1) * lh) / 2;
     let maxW = 1;
     lines.forEach((line) => { maxW = Math.max(maxW, ctx.measureText(line).width); });
     const halfW = maxW / 2, halfH = (lines.length * lh) / 2, angle = (t.rotation ?? 0) * Math.PI / 180;
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(angle);
-    lines.forEach((line, i) => ctx.fillText(line, 0, top + i * lh));
+    lines.forEach((line, i) => {
+      const width = ctx.measureText(line).width;
+      const x = t.align === 'left' ? -maxW / 2 + width / 2 : t.align === 'right' ? maxW / 2 - width / 2 : 0;
+      if ((t.strokeWidth ?? 0) > 0) { ctx.lineWidth = t.strokeWidth! * Math.max(1, px / 24); ctx.lineJoin = 'round'; ctx.strokeStyle = t.strokeColor ?? '#000000'; ctx.strokeText(line, x, top + i * lh); }
+      ctx.fillText(line, x, top + i * lh);
+    });
     ctx.restore();
     const corners = [[-halfW,-halfH],[halfW,-halfH],[halfW,halfH],[-halfW,halfH]].map(([x,y]) => ({ x: cx + x*Math.cos(angle)-y*Math.sin(angle), y: cy + x*Math.sin(angle)+y*Math.cos(angle) }));
     boxes.push({ id: t.id, x0: Math.min(...corners.map(q=>q.x)), x1: Math.max(...corners.map(q=>q.x)), y0: Math.min(...corners.map(q=>q.y)), y1: Math.max(...corners.map(q=>q.y)) });
