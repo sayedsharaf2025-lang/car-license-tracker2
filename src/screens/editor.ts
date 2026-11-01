@@ -322,7 +322,7 @@ export function editorScreen(): Screen {
   const clonePanel = h('section', { class: 'sheet', hidden: true },
     h('p', { class: 'muted' }, 'استنساخ نسيج الخلفية أو أجزاء الصورة لترميم العيوب. اختر المصدر أولاً ثم ارسم فوق المنطقة المطلوبة.'),
     h('div', { class: 'row' }, cloneSourceBtn, cloneClearBtn, cloneAlignedBtn),
-    slider('حجم الفرشاة', 6, 120, radiusPx, (v) => { radiusPx = v; schedule(); }),
+    slider('حجم الفرشاة', 1, 300, radiusPx, (v) => { radiusPx = v; schedule(); }),
     slider('نعومة الحواف', 0, 100, Math.round(cloneHardness * 100), (v) => { cloneHardness = v / 100; schedule(); }),
     slider('الشفافية', 10, 100, Math.round(cloneOpacity * 100), (v) => { cloneOpacity = v / 100; schedule(); }),
     h('p', { class: 'muted' }, 'في الوضع المحاذي يتبع المصدر الفرشاة مع ثبات الإزاحة بين الضربات. أوقف المحاذاة لإعادة المصدر إلى موضعه الأصلي مع كل ضربة.'));
@@ -438,7 +438,7 @@ export function editorScreen(): Screen {
     }
     if (panPointer?.id === e.pointerId) { panX = panPointer.startX + e.clientX - panPointer.x; panY = panPointer.startY + e.clientY - panPointer.y; applyView(); return; }
     const pt = toImage(e);
-    if (tool === 'clone') { cloneCursorPos = { x: pt.x, y: pt.y }; schedule(); }
+    if (tool === 'clone') { cloneCursorPos = { x: pt.x, y: pt.y }; if (!choosingCloneSource && cloneOffset) { const sx = p!.bitmap.width / W, sy = p!.bitmap.height / H; currentSourcePos = cloneSourcePoint({ x: pt.x, y: pt.y }, cloneOffset, sx, sy); } schedule(); }
     const l = cur();
     if (cropDrag) { cropMove(pt); return; }
     if (drag && l) { l.cx = pt.x / W + drag.dx; l.cy = pt.y / H + drag.dy; schedule(); return; }
