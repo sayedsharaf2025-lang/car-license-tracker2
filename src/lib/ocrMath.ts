@@ -147,5 +147,5 @@ export function fixArabicOrder(s: string): string {
   }
   if (pendingMarks) clusters.push(pendingMarks);
   const reversed = clusters.reverse().join('');
-  return reversed.replace(/[A-Za-z0-9][A-Za-z0-9.,:%/@-]*/g, (m) => [...m].reverse().join(''));
+  return reversed.replace(/[A-Za-z0-9\u0660-\u0669\u06F0-\u06F9][A-Za-z0-9\u0660-\u0669\u06F0-\u06F9.,:%/@+\-]*/g, (m) => [...m].reverse().join(''));
 }
