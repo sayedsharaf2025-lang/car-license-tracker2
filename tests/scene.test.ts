@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { coverRect, hitTest, isArabic } from '../src/lib/scene.ts';
+import { coverRect, hitTest, isArabic, splitTextLines } from '../src/lib/scene.ts';
 
 test('coverRect crops the longer side, centered', () => {
   const r = coverRect(2000, 1000, 100, 100); // wide image into a square
@@ -11,3 +11,5 @@ test('hitTest returns the topmost box', () => {
   assert.equal(hitTest(boxes, 7, 7), 'b'); assert.equal(hitTest(boxes, 1, 1), 'a'); assert.equal(hitTest(boxes, 50, 50), null);
 });
 test('isArabic', () => { assert.ok(isArabic('مرحبا abc')); assert.ok(!isArabic('hello')); });
+
+test('splitTextLines supports real multiline Arabic text and Windows newlines', () => { assert.deepEqual(splitTextLines('سطر أول\nسطر ثاني\r\nسطر ثالث'), ['سطر أول', 'سطر ثاني', 'سطر ثالث']); });
