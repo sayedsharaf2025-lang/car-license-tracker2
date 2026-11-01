@@ -1,7 +1,11 @@
-# محرر الصور (local Android photo editor): slice 1
+# محرر الصور (local Android photo editor)
+
+**دليل التشغيل بالعربي: `README.ar.md`.** Latest additions: MI-GAN object/text removal (downloaded on first use), edit text inside a photo, crop with any shape + resize, WebP/original-format export, 27 fonts. Models for the APK are now downloaded by the GitHub workflow (see `.github/workflows/android.yml`); for local runs use `bash scripts/get-models.sh`.
+
+## Slice 1
 
 What works in code (written, NOT yet run on a phone): pick a photo, remove the background on-device, refine with an Erase/Restore brush, undo/redo, hold to compare, export PNG (transparent) or JPG.
-Everything else in the tool strip shows "coming soon". Stub routes exist for screens S06-S19.
+Slice 2 adds: change the background (transparent / color / gallery image) and add Arabic or English text (5 bundled fonts, move, size, color). Slice 3 adds Remove Object and the Font finder. Crop, filters and project saving still show "coming soon". Stub routes exist for screens S06-S19.
 
 ## 1. Get the model (required, about 4 MB)
 
@@ -30,3 +34,14 @@ U2-Net is Apache-2.0; rembg is MIT. This is the small model: faster, rougher edg
 - If you change `appId` in `capacitor.config.ts`, change the `package` line at the top of both Java files to match.
 - Speed and memory on your phone are unknown. Working copy is capped at 1600 px; export is capped at 4096 px.
 - The model quality on hair and fine edges is limited (small model).
+
+## 4. Arabic text reading (OCR) files, about 10 MB, optional
+
+Without them the Font finder still works (you type the text). Put these in `public/models/` with these exact names:
+
+    curl -L -o public/models/ocr_det.onnx  https://huggingface.co/monkt/paddleocr-onnx/resolve/main/detection/v3/det.onnx
+    curl -L -o public/models/ocr_rec.onnx  https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/arabic/rec.onnx
+    curl -L -o public/models/ocr_dict.txt  https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/arabic/dict.txt
+
+Paths follow that repository's README; I could not download them here, so check the sizes with `ls -l public/models` (the detector should be about 2 MB). The models are PaddleOCR (Apache-2.0); check the licence of the ONNX copy too.
+Known limits: Arabic output is reordered by a simple rule (mixed Arabic/Latin lines may come out wrong), and stylized display fonts read badly. The text box is editable before you search.

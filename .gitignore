@@ -2,3 +2,4 @@ node_modules
 dist
 android
 public/ort
+public/models/migan_pipeline_v2.onnx
