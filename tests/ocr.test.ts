@@ -56,3 +56,16 @@ test('recognition preprocessing adds crop margins and creates enhanced contrast 
   assert.equal(contrast.data.length, original.data.length);
   assert.ok(contrast.data.every(Number.isFinite));
 });
+
+test('binary OCR preprocessing handles uneven grayscale and stays finite', () => {
+  const w = 120, h = 36, rgba = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4, paper = 175 + Math.round(x * 0.35), ink = x > 35 && x < 82 && y > 9 && y < 27;
+    const v = ink ? 55 : Math.min(245, paper);
+    rgba[i] = rgba[i + 1] = rgba[i + 2] = v; rgba[i + 3] = 255;
+  }
+  const binary = recPreprocess(rgba, w, h, { x0: 0, y0: 0, x1: w, y1: h }, 'binary');
+  assert.ok(binary.data.every(v => Number.isFinite(v)));
+  assert.ok(binary.data.some(v => v < -0.9));
+  assert.ok(binary.data.some(v => v > 0.9));
+});
