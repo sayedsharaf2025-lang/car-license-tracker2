@@ -60,6 +60,14 @@ self.onmessage = async (e: MessageEvent) => {
         const candidate = ctcDecodeScored(secondTensor.data as Float32Array, secondDims[1], secondDims[2], chars);
         if (candidate.confidence > best.confidence) best = candidate;
       }
+      // A final Otsu-binarized pass can recover low-contrast ink on stained or shaded paper.
+      if (best.confidence < 0.94) {
+        const binary = recPreprocess(rgba, w, h, r, 'binary');
+        const third = await rec.run({ [rec.inputNames[0]]: new ort.Tensor('float32', binary.data, [1, 3, REC_H, binary.rw]) });
+        const thirdTensor = third[rec.outputNames[0]], thirdDims = thirdTensor.dims as readonly number[];
+        const candidate = ctcDecodeScored(thirdTensor.data as Float32Array, thirdDims[1], thirdDims[2], chars);
+        if (candidate.confidence > best.confidence) best = candidate;
+      }
       texts.push(fixArabicOrder(best.text));
     }
     post({ id, text: texts.filter(Boolean).join('\n') });
