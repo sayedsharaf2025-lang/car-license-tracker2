@@ -98,7 +98,8 @@ export function ctcDecodeScored(logits: Float32Array, T: number, C: number, char
     let denom = 0;
     for (let c = 0; c < C; c++) denom += Math.exp(logits[t * C + c] - maxLogit);
     const confidence = denom ? Math.exp(bv - maxLogit) / denom : 0;
-    score += confidence; count++;
+    // Ignore confident CTC blanks; they must not hide uncertain character predictions.
+    if (best !== 0) { score += confidence; count++; }
     if (best !== 0 && best !== prev) out += chars[best] ?? '';
     prev = best;
   }
