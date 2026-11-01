@@ -68,3 +68,6 @@ input[type="color"] { min-width: var(--tap-min); min-height: var(--tap-min); bor
 .layer-row .chip:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .layer-row .chip { min-height: 36px; padding-inline: 10px; font-size: var(--text-xs); }
 .sheet h3 { margin: var(--space-2) 0 0; font-size: var(--text-sm); }
+
+/* Clone stamp panel and touch-friendly controls */
+.clone-source-active { outline: 2px solid var(--color-accent); }
