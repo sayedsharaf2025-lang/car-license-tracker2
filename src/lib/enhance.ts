@@ -32,15 +32,22 @@ export function adjustPixels(src: Uint8ClampedArray, settings: EnhanceSettings):
 export function enhancePixels(src: Uint8ClampedArray, width: number, height: number, settings: EnhanceSettings): Uint8ClampedArray {
   const out = adjustPixels(src, { ...settings, sharpen: 0, denoise: 0 });
   if (settings.denoise > 0) {
-    const amount = settings.denoise / 100, base = out.slice();
+    const amount = Math.min(1, settings.denoise / 100), base = out.slice();
+    const sigma = 12 + (1 - amount) * 24;
     for (let y = 1; y < height - 1; y++) for (let x = 1; x < width - 1; x++) {
-      const i = (y * width + x) * 4;
-      for (let c = 0; c < 3; c++) {
-        const avg = (base[i - 4 + c] + base[i + 4 + c] + base[i - width * 4 + c] + base[i + width * 4 + c]) / 4;
-        const diff = Math.abs(base[i + c] - avg);
-        const weight = amount * Math.min(1, diff / 32);
-        out[i + c] = clamp(base[i + c] * (1 - weight) + avg * weight);
+      const i = (y * width + x) * 4, cr = base[i], cg = base[i + 1], cb = base[i + 2];
+      let sr = 0, sg = 0, sb = 0, total = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const j = ((y + dy) * width + x + dx) * 4;
+        const dr = base[j] - cr, dg = base[j + 1] - cg, db = base[j + 2] - cb;
+        const distance = (dr * dr + dg * dg + db * db) / 3;
+        const spatial = dx === 0 && dy === 0 ? 1 : (dx === 0 || dy === 0 ? 0.72 : 0.5);
+        const weight = spatial * Math.exp(-distance / (2 * sigma * sigma));
+        total += weight; sr += base[j] * weight; sg += base[j + 1] * weight; sb += base[j + 2] * weight;
       }
+      out[i] = clamp(cr * (1 - amount * 0.8) + (sr / total) * amount * 0.8);
+      out[i + 1] = clamp(cg * (1 - amount * 0.8) + (sg / total) * amount * 0.8);
+      out[i + 2] = clamp(cb * (1 - amount * 0.8) + (sb / total) * amount * 0.8);
     }
   }
   if (settings.sharpen > 0) {
