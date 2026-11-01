@@ -9,8 +9,11 @@ h2 { font-size: var(--text-lg); line-height: var(--text-lg-line); margin: var(--
 .page { padding: var(--space-5); display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
 .recent { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); width: 100%; }
 
-.btn { display: inline-flex; align-items: center; justify-content: center; min-height: var(--tap-min); padding-inline: var(--space-5);
-  border-radius: var(--radius-md); border: 1px solid transparent; font: inherit; font-weight: 600; cursor: pointer; }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 12px;
+  border-radius: var(--radius-md); border: 1px solid transparent; font: inherit; font-size: var(--text-sm); font-weight: 600; cursor: pointer; }
+.btn.small { min-height: 34px; padding-inline: 9px; font-size: var(--text-xs); }
+.topbar .btn, .topbar .icon-btn { min-height: 36px; min-width: 36px; padding-inline: 9px; font-size: var(--text-sm); }
+.actions .btn { min-height: 40px; }
 .btn.primary { background: var(--color-accent); color: var(--color-on-accent); }
 .btn.secondary { background: var(--color-surface-raised); color: var(--color-text); border-color: var(--color-border); }
 .btn.ghost { background: transparent; color: var(--color-text); }
@@ -19,8 +22,8 @@ h2 { font-size: var(--text-lg); line-height: var(--text-lg-line); margin: var(--
 .icon-btn { min-width: var(--tap-min); min-height: var(--tap-min); border: 0; border-radius: var(--radius-md);
   background: transparent; color: var(--color-text); font-size: var(--text-lg); cursor: pointer; }
 .icon-btn:disabled { opacity: .35; }
-.chip { min-height: 40px; padding-inline: var(--space-4); border-radius: var(--radius-pill); border: 1px solid var(--color-border-input);
-  background: transparent; color: var(--color-text); font: inherit; cursor: pointer; }
+.chip { min-height: 36px; padding: 0 10px; border-radius: var(--radius-pill); border: 1px solid var(--color-border-input);
+  background: transparent; color: var(--color-text); font: inherit; font-size: var(--text-sm); cursor: pointer; }
 .chip[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); border-color: var(--color-accent); }
 
 .editor { display: flex; flex-direction: column; height: 100%; background: var(--color-bg); position: relative; }
@@ -43,7 +46,7 @@ h2 { font-size: var(--text-lg); line-height: var(--text-lg-line); margin: var(--
 .row label { min-width: 96px; }
 .row input[type="range"] { flex: 1; min-height: var(--tap-min); accent-color: var(--color-accent); }
 .toolstrip { display: flex; gap: var(--space-1); overflow-x: auto; height: var(--tool-strip); padding-inline: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-bg); }
-.tool { min-width: 72px; border: 0; background: transparent; color: var(--color-text-muted); font: inherit; font-size: var(--text-xs); cursor: pointer;
+.tool { min-width: 60px; padding-inline: 5px; border: 0; background: transparent; color: var(--color-text-muted); font: inherit; font-size: var(--text-xs); cursor: pointer;
   border-bottom: 3px solid transparent; }
 .tool[aria-pressed="true"] { color: var(--color-accent); border-bottom-color: var(--color-accent); }
 
