@@ -30,6 +30,7 @@ export function adjustPixels(src: Uint8ClampedArray, settings: EnhanceSettings):
 }
 /** Dimension-aware filter entry point for the editor. */
 export function enhancePixels(src: Uint8ClampedArray, width: number, height: number, settings: EnhanceSettings): Uint8ClampedArray {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || src.length !== width * height * 4) throw new RangeError('Image dimensions do not match pixel buffer');
   const out = adjustPixels(src, { ...settings, sharpen: 0, denoise: 0 });
   if (settings.denoise > 0) {
     const amount = Math.min(1, settings.denoise / 100), base = out.slice();
