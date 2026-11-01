@@ -81,3 +81,13 @@ input[type="color"] { min-width: var(--tap-min); min-height: var(--tap-min); bor
 .tool { flex: 0 0 auto; min-height: 48px; position: relative; }
 .tool[aria-expanded="true"] { color: var(--color-accent); background: var(--color-surface-raised); border-bottom-color: var(--color-accent); font-weight: 700; }
 .tool:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -3px; border-radius: var(--radius-sm); }
+
+/* Precision Arabic text sizing */
+.text-size-control { display: grid; gap: 8px; width: 100%; }
+.text-size-heading, .text-size-entry { display: flex; align-items: center; gap: 8px; }
+.text-size-heading { justify-content: space-between; flex-wrap: wrap; }
+.text-size-heading label { font-weight: 700; }
+.text-size-range { width: 100%; min-height: 36px; accent-color: var(--color-accent); direction: ltr; }
+.text-size-entry { justify-content: center; }
+.text-size-number { width: 112px; min-height: 42px; padding: 6px 10px; border: 1px solid var(--color-border-input); border-radius: var(--radius-md); background: var(--color-bg); color: var(--color-text); font: inherit; text-align: center; direction: ltr; }
+.text-size-entry .chip { min-width: 42px; font-size: 20px; }
