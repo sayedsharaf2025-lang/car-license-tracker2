@@ -1,5 +1,5 @@
 import * as ort from 'onnxruntime-web/wasm';
-import { detPreprocess, detBoxes, groupLines, recPreprocess, buildChars, ctcDecode, fixArabicOrder, REC_H, type Rect } from './ocrMath.ts';
+import { detPreprocess, detBoxes, groupLines, recPreprocess, buildChars, ctcDecodeScored, fixArabicOrder, REC_H, type Rect } from './ocrMath.ts';
 
 ort.env.wasm.wasmPaths = '/ort/';
 ort.env.wasm.numThreads = 1;
@@ -18,7 +18,7 @@ self.onmessage = async (e: MessageEvent) => {
   try {
     if (!det) det = await ort.InferenceSession.create(new Uint8Array(await bytes('/models/ocr_det.onnx', 100_000)), { executionProviders: ['wasm'] });
     if (mode === 'detect') {
-      const d = detPreprocess(rgba, w, h);
+      const d = detPreprocess(rgba, w, h, 1280);
       const dout = await det.run({ [det.inputNames[0]]: new ort.Tensor('float32', d.data, [1, 3, d.dh, d.dw]) });
       const words: Rect[] = detBoxes(dout[det.outputNames[0]].data as Float32Array, d.dw, d.dh)
         .map((r) => ({ x0: (r.x0 * w) / d.dw, x1: (r.x1 * w) / d.dw, y0: (r.y0 * h) / d.dh, y1: (r.y1 * h) / d.dh }));
@@ -34,10 +34,19 @@ self.onmessage = async (e: MessageEvent) => {
     if (!lines.length) lines = [{ x0: 0, y0: 0, x1: w, y1: h }]; // tight selection: treat it as one line
     const texts: string[] = [];
     for (const r of lines) {
-      const p = recPreprocess(rgba, w, h, r);
-      const o = await rec.run({ [rec.inputNames[0]]: new ort.Tensor('float32', p.data, [1, 3, REC_H, p.rw]) });
-      const t = o[rec.outputNames[0]], dims = t.dims as readonly number[];
-      texts.push(fixArabicOrder(ctcDecode(t.data as Float32Array, dims[1], dims[2], chars)));
+      const original = recPreprocess(rgba, w, h, r, 'original');
+      const first = await rec.run({ [rec.inputNames[0]]: new ort.Tensor('float32', original.data, [1, 3, REC_H, original.rw]) });
+      const firstTensor = first[rec.outputNames[0]], firstDims = firstTensor.dims as readonly number[];
+      let best = ctcDecodeScored(firstTensor.data as Float32Array, firstDims[1], firstDims[2], chars);
+      // Retry low-contrast or uncertain lines with a grayscale contrast-normalised view.
+      if (best.confidence < 0.94) {
+        const enhanced = recPreprocess(rgba, w, h, r, 'contrast');
+        const second = await rec.run({ [rec.inputNames[0]]: new ort.Tensor('float32', enhanced.data, [1, 3, REC_H, enhanced.rw]) });
+        const secondTensor = second[rec.outputNames[0]], secondDims = secondTensor.dims as readonly number[];
+        const candidate = ctcDecodeScored(secondTensor.data as Float32Array, secondDims[1], secondDims[2], chars);
+        if (candidate.confidence > best.confidence) best = candidate;
+      }
+      texts.push(fixArabicOrder(best.text));
     }
     post({ id, text: texts.filter(Boolean).join('\n') });
   } catch (err) {
