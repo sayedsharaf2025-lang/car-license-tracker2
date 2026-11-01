@@ -28,7 +28,8 @@ export function inkMask(g: Uint8Array, w?: number, h?: number): Uint8Array {
   const th = otsu(g), m = new Uint8Array(g.length);
   let dark = 0;
   for (let i = 0; i < g.length; i++) if (g[i] <= th) { m[i] = 1; dark++; }
-  if (dark > g.length / 2) for (let i = 0; i < m.length; i++) m[i] ^= 1;
+  const lightInk = dark > g.length / 2;
+  if (lightInk) for (let i = 0; i < m.length; i++) m[i] ^= 1;
   if (!w || !h || w * h !== g.length || w < 8 || h < 8) return m;
 
   // Integral-image adaptive threshold recovers strokes in shadows/gradients.
@@ -43,7 +44,7 @@ export function inkMask(g: Uint8Array, w?: number, h?: number): Uint8Array {
     const x0 = Math.max(0, x - radius), x1 = Math.min(w, x + radius + 1), y0 = Math.max(0, y - radius), y1 = Math.min(h, y + radius + 1);
     const sum = integral[y1 * stride + x1] - integral[y0 * stride + x1] - integral[y1 * stride + x0] + integral[y0 * stride + x0];
     const mean = sum / ((x1 - x0) * (y1 - y0));
-    adaptive[y * w + x] = g[y * w + x] < mean - 9 ? 1 : 0;
+    adaptive[y * w + x] = lightInk ? (g[y * w + x] > mean + 9 ? 1 : 0) : (g[y * w + x] < mean - 9 ? 1 : 0);
   }
   // Prefer adaptive segmentation only when it finds a plausible amount of ink.
   let count = 0; for (const v of adaptive) count += v;
