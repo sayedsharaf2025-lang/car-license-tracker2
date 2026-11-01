@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   fitSize, resizeRGBABilinear, resizeMaskBilinear, toTensorNCHW, postprocessMask,
-  compositeCutout, paintBrush,
+  compositeCutout, paintBrush, thresholdMask,
 } from '../src/lib/maskMath.ts';
 
 test('fitSize keeps aspect ratio and never upscales', () => {
@@ -68,4 +68,11 @@ test('paintBrush at the border does not throw', () => {
   paintBrush(mask, 10, 10, 0, 0, 8, 1, 'erase');
   paintBrush(mask, 10, 10, 9, 9, 8, 0.5, 'restore');
   assert.ok(true);
+});
+
+test('thresholdMask converts confidence to a binary selection without changing source', () => {
+  const source = new Uint8Array([0, 64, 127, 128, 200, 255]);
+  assert.deepEqual([...thresholdMask(source, 128)], [0, 0, 0, 255, 255, 255]);
+  assert.deepEqual([...source], [0, 64, 127, 128, 200, 255]);
+  assert.deepEqual([...thresholdMask(source, 256)], [0, 0, 0, 0, 0, 0]);
 });
