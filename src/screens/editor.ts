@@ -6,7 +6,7 @@ import { compositeCutout, paintBrush, resizeMaskBilinear, thresholdMask, type Br
 import { inpaint } from '../lib/inpaint.ts';
 import { fillHoles, prepareMigan, miganStatus, MiganError, type MiganStage } from '../lib/migan.ts';
 import { findFonts, cropSel, type Sel } from '../lib/fontFinder.ts';
-import { readText, detectText } from '../lib/ocr.ts';
+import { readText, detectText, disposeOCR } from '../lib/ocr.ts';
 import { workingCopy } from '../lib/image.ts';
 import { segment, SegmentError } from '../lib/segment.ts';
 import { renderExport, saveFile, shareBlob, formatOfMime, type Format, type Saved } from '../lib/export.ts';
@@ -63,6 +63,8 @@ export function editorScreen(): Screen {
     if (p!.mask && !showOriginal) compositeCutout(p!.rgba, p!.mask, frame.data); else frame.data.set(p!.rgba);
     cutCtx.putImageData(frame, 0, 0);
     boxes = drawScene(ctx, W, H, showOriginal ? { kind: 'transparent' } : p!.bg, cutCanvas, showOriginal ? [] : p!.texts);
+    // Show clone-stamp strokes live while the pointer is down, not only on pointerup.
+    if (isCloning && cloneCanvas) ctx.drawImage(cloneCanvas, 0, 0, W, H);
     if (tool === 'obj') {
       for (let i = 0; i < objMask.length; i++) { const a = objMask[i] >= objectThreshold ? 150 : 0; ovFrame.data[i * 4] = 255; ovFrame.data[i * 4 + 1] = 60; ovFrame.data[i * 4 + 2] = 60; ovFrame.data[i * 4 + 3] = a; }
       ovCanvas.getContext('2d')!.putImageData(ovFrame, 0, 0); ctx.drawImage(ovCanvas, 0, 0);
@@ -827,5 +829,5 @@ export function editorScreen(): Screen {
 
   applyView();
   draw();
-  return { el, dispose: () => { job?.cancel(); if (raf) cancelAnimationFrame(raf); } };
+  return { el, dispose: () => { job?.cancel(); disposeOCR(); if (raf) cancelAnimationFrame(raf); } };
 }
