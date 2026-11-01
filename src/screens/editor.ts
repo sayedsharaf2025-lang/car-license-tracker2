@@ -194,7 +194,8 @@ export function editorScreen(): Screen {
   let choosingCloneSource = true, cloneOpacity = 0.85, cloneHardness = 0.75;
   let cloneCanvas: HTMLCanvasElement | null = null, cloneCtx: CanvasRenderingContext2D | null = null;
   let cloneSample: HTMLCanvasElement | null = null, cloneSampleCtx: CanvasRenderingContext2D | null = null;
-  let cloneOffset: { x: number; y: number } | null = null;\n  let cloneStampCanvas: HTMLCanvasElement | null = null, cloneStampCtx: CanvasRenderingContext2D | null = null;
+  let cloneOffset: { x: number; y: number } | null = null;
+  let cloneStampCanvas: HTMLCanvasElement | null = null, cloneStampCtx: CanvasRenderingContext2D | null = null;
   const cloneSourceBtn = h('button', { class: 'btn primary', onclick: () => { choosingCloneSource = true; cloneSourceBtn.textContent = 'حدد المصدر على الصورة'; toast('اضغط على منطقة نظيفة لتحديد المصدر'); } }, 'حدد المصدر على الصورة');
   const cloneClearBtn = h('button', { class: 'btn ghost', onclick: () => { cloneSource = null; choosingCloneSource = true; cloneSourceBtn.textContent = 'حدد المصدر على الصورة'; toast('تم مسح المصدر'); } }, 'مسح المصدر');
   const clonePanel = h('section', { class: 'sheet', hidden: true },
@@ -215,7 +216,8 @@ export function editorScreen(): Screen {
     cloneCtx = cloneCanvas.getContext('2d')!; cloneCtx.drawImage(p!.bitmap, 0, 0);
     cloneSample = document.createElement('canvas'); cloneSample.width = bw; cloneSample.height = bh;
     cloneSampleCtx = cloneSample.getContext('2d')!; cloneSampleCtx.drawImage(p!.bitmap, 0, 0);
-    cloneOffset = { x: (cloneSource.x - pt.x) * sx, y: (cloneSource.y - pt.y) * sy };\n    cloneStampCanvas = document.createElement('canvas'); cloneStampCanvas.width = Math.max(2, Math.ceil(radiusPx * (sx + sy))); cloneStampCanvas.height = cloneStampCanvas.width; cloneStampCtx = cloneStampCanvas.getContext('2d')!;
+    cloneOffset = { x: (cloneSource.x - pt.x) * sx, y: (cloneSource.y - pt.y) * sy };
+    cloneStampCanvas = document.createElement('canvas'); cloneStampCanvas.width = Math.max(2, Math.ceil(radiusPx * (sx + sy))); cloneStampCanvas.height = cloneStampCanvas.width; cloneStampCtx = cloneStampCanvas.getContext('2d')!;
     paintClone(pt.x, pt.y);
     return true;
   }
