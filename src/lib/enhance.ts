@@ -35,6 +35,8 @@ export function enhancePixels(src: Uint8ClampedArray, width: number, height: num
   if (settings.denoise > 0) {
     const amount = Math.min(1, settings.denoise / 100), base = out.slice();
     const sigma = 12 + (1 - amount) * 24;
+    const colourLut = new Float32Array(65026);
+    for (let d = 0; d < colourLut.length; d++) colourLut[d] = Math.exp(-d / (2 * sigma * sigma));
     for (let y = 1; y < height - 1; y++) for (let x = 1; x < width - 1; x++) {
       const i = (y * width + x) * 4, cr = base[i], cg = base[i + 1], cb = base[i + 2];
       let sr = 0, sg = 0, sb = 0, total = 0;
@@ -43,7 +45,7 @@ export function enhancePixels(src: Uint8ClampedArray, width: number, height: num
         const dr = base[j] - cr, dg = base[j + 1] - cg, db = base[j + 2] - cb;
         const distance = (dr * dr + dg * dg + db * db) / 3;
         const spatial = dx === 0 && dy === 0 ? 1 : (dx === 0 || dy === 0 ? 0.72 : 0.5);
-        const weight = spatial * Math.exp(-distance / (2 * sigma * sigma));
+        const weight = spatial * colourLut[Math.min(65025, Math.round(distance))];
         total += weight; sr += base[j] * weight; sg += base[j + 1] * weight; sb += base[j + 2] * weight;
       }
       out[i] = clamp(cr * (1 - amount * 0.8) + (sr / total) * amount * 0.8);
