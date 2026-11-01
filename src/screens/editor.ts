@@ -67,6 +67,23 @@ export function editorScreen(): Screen {
     }
     if (tool === 'edit') detected.forEach((r, i) => { ctx.strokeStyle = i === pick ? '#ffd23d' : '#3ddc97'; ctx.lineWidth = Math.max(i === pick ? 4 : 2, W / 400); ctx.strokeRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0); });
     if (tool === 'crop') drawCropOverlay();
+    if (tool === 'clone') {
+      ctx.save();
+      if (choosingCloneSource && cloneCursorPos) {
+        const x=cloneCursorPos.x, y=cloneCursorPos.y, q=Math.max(9,W/90);
+        ctx.strokeStyle='#fff'; ctx.lineWidth=Math.max(1.5,W/500); ctx.beginPath();
+        ctx.moveTo(x-q,y); ctx.lineTo(x+q,y); ctx.moveTo(x,y-q); ctx.lineTo(x,y+q); ctx.stroke();
+      }
+      if (currentSourcePos) {
+        ctx.fillStyle='rgba(45,205,120,.22)'; ctx.strokeStyle='rgba(45,205,120,.95)';
+        ctx.lineWidth=Math.max(1.5,W/500); ctx.beginPath(); ctx.arc(currentSourcePos.x,currentSourcePos.y,radiusPx,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      }
+      if (cloneCursorPos) {
+        ctx.strokeStyle='rgba(255,255,255,.95)'; ctx.lineWidth=Math.max(1,W/650);
+        ctx.beginPath(); ctx.arc(cloneCursorPos.x,cloneCursorPos.y,radiusPx,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.restore();
+    }
     if (tool === 'font' && sel) { ctx.strokeStyle = '#3ddc97'; ctx.lineWidth = Math.max(2, W / 300); ctx.setLineDash([12, 8]); ctx.strokeRect(sel.x0, sel.y0, sel.x1 - sel.x0, sel.y1 - sel.y0); ctx.setLineDash([]); }
     const b = boxes.find((x) => x.id === selected);
     if (b && tool === 'text') { ctx.strokeStyle = '#5b8def'; ctx.lineWidth = Math.max(2, W / 300); ctx.strokeRect(b.x0 - 6, b.y0 - 6, b.x1 - b.x0 + 12, b.y1 - b.y0 + 12); }
@@ -189,60 +206,89 @@ export function editorScreen(): Screen {
     loadFont(l.font).then(schedule); renderText(); schedule();
   }
 
-  // --- clone stamp: clone photo texture/background only; no text recognition or text-layer copying
+  // --- clone stamp: photo texture/background retouching
+  let cloneAligned = true;
   let cloneSource: { x: number; y: number } | null = null;
-  let choosingCloneSource = true, cloneOpacity = 0.85, cloneHardness = 0.75;
+  let cloneOffset: { x: number; y: number } | null = null;
+  let currentSourcePos: { x: number; y: number } | null = null;
+  let isCloning = false, choosingCloneSource = true, cloneOpacity = 0.85, cloneHardness = 0.75;
+  let cloneCursorPos: { x: number; y: number } | null = null;
   let cloneCanvas: HTMLCanvasElement | null = null, cloneCtx: CanvasRenderingContext2D | null = null;
   let cloneSample: HTMLCanvasElement | null = null, cloneSampleCtx: CanvasRenderingContext2D | null = null;
-  let cloneOffset: { x: number; y: number } | null = null;
   let cloneStampCanvas: HTMLCanvasElement | null = null, cloneStampCtx: CanvasRenderingContext2D | null = null;
-  const cloneSourceBtn = h('button', { class: 'btn primary', onclick: () => { choosingCloneSource = true; cloneSourceBtn.textContent = 'حدد المصدر على الصورة'; toast('اضغط على منطقة نظيفة لتحديد المصدر'); } }, 'حدد المصدر على الصورة');
-  const cloneClearBtn = h('button', { class: 'btn ghost', onclick: () => { cloneSource = null; choosingCloneSource = true; cloneSourceBtn.textContent = 'حدد المصدر على الصورة'; toast('تم مسح المصدر'); } }, 'مسح المصدر');
+  const cloneSourceBtn = h('button', { class: 'btn primary', onclick: () => {
+    cloneSource = null; cloneOffset = null; currentSourcePos = null; isCloning = false;
+    choosingCloneSource = true; cloneSourceBtn.textContent = 'حدد المصدر على الصورة';
+    cloneClearBtn.hidden = true; canvas.classList.add('clone-pick-source'); toast('اضغط على منطقة نظيفة لتحديد المصدر'); schedule();
+  } }, 'حدد المصدر على الصورة');
+  const cloneClearBtn = h('button', { class: 'btn ghost', hidden: true, onclick: () => {
+    cloneSource = null; cloneOffset = null; currentSourcePos = null; isCloning = false; choosingCloneSource = true;
+    cloneSourceBtn.textContent = 'حدد المصدر على الصورة'; cloneClearBtn.hidden = true;
+    canvas.classList.add('clone-pick-source'); toast('تم مسح المصدر'); schedule();
+  } }, 'مسح المصدر');
+  const cloneAlignedBtn: HTMLButtonElement = chip('محاذي (Aligned)', true, () => {
+    cloneAligned = !cloneAligned; cloneAlignedBtn.setAttribute('aria-pressed', String(cloneAligned));
+    cloneAlignedBtn.textContent = cloneAligned ? 'محاذي (Aligned)' : 'غير محاذي (Free)';
+    if (!cloneAligned) cloneOffset = null;
+  });
   const clonePanel = h('section', { class: 'sheet', hidden: true },
     h('p', { class: 'muted' }, 'استنساخ نسيج الخلفية أو أجزاء الصورة لترميم العيوب. اختر المصدر أولاً ثم ارسم فوق المنطقة المطلوبة.'),
-    h('div', { class: 'row' }, cloneSourceBtn, cloneClearBtn),
-    slider('حجم الفرشاة', 6, 120, radiusPx, (v) => { radiusPx = v; }),
-    slider('نعومة الحواف', 0, 100, Math.round(cloneHardness * 100), (v) => { cloneHardness = v / 100; }),
-    slider('شفافية الاستنساخ', 10, 100, Math.round(cloneOpacity * 100), (v) => { cloneOpacity = v / 100; }),
-    h('p', { class: 'muted' }, 'استخدم التكبير للمحاذاة الدقيقة. التراجع يعيد الصورة الأصلية قبل آخر ضربة.'));
+    h('div', { class: 'row' }, cloneSourceBtn, cloneClearBtn, cloneAlignedBtn),
+    slider('حجم الفرشاة', 6, 120, radiusPx, (v) => { radiusPx = v; schedule(); }),
+    slider('نعومة الحواف', 0, 100, Math.round(cloneHardness * 100), (v) => { cloneHardness = v / 100; schedule(); }),
+    slider('الشفافية', 10, 100, Math.round(cloneOpacity * 100), (v) => { cloneOpacity = v / 100; schedule(); }),
+    h('p', { class: 'muted' }, 'في الوضع المحاذي يتبع المصدر الفرشاة مع ثبات الإزاحة بين الضربات. أوقف المحاذاة لإعادة المصدر إلى موضعه الأصلي مع كل ضربة.'));
   function beginCloneStroke(pt: { x: number; y: number }) {
-    const bw = p!.bitmap.width, bh = p!.bitmap.height, sx = bw / W, sy = bh / H;
+    if (isCloning) return false;
     if (choosingCloneSource || !cloneSource) {
-      cloneSource = { x: pt.x, y: pt.y }; choosingCloneSource = false;
-      cloneSourceBtn.textContent = 'تغيير نقطة المصدر'; toast('تم تحديد المصدر. ارسم الآن في المكان المطلوب.'); schedule(); return false;
+      cloneSource = { x: pt.x, y: pt.y }; cloneOffset = null; currentSourcePos = null;
+      choosingCloneSource = false; cloneSourceBtn.textContent = 'تغيير نقطة المصدر';
+      cloneClearBtn.hidden = false; canvas.classList.remove('clone-pick-source');
+      toast('تم تحديد المصدر. ارسم الآن في المكان المطلوب.'); schedule(); return false;
     }
+    const bw = p!.bitmap.width, bh = p!.bitmap.height, sx = bw / W, sy = bh / H;
+    if (!cloneAligned || !cloneOffset) cloneOffset = { x: (cloneSource.x - pt.x) * sx, y: (cloneSource.y - pt.y) * sy };
     captureHistory(true);
     cloneCanvas = document.createElement('canvas'); cloneCanvas.width = bw; cloneCanvas.height = bh;
     cloneCtx = cloneCanvas.getContext('2d')!; cloneCtx.drawImage(p!.bitmap, 0, 0);
     cloneSample = document.createElement('canvas'); cloneSample.width = bw; cloneSample.height = bh;
     cloneSampleCtx = cloneSample.getContext('2d')!; cloneSampleCtx.drawImage(p!.bitmap, 0, 0);
-    cloneOffset = { x: (cloneSource.x - pt.x) * sx, y: (cloneSource.y - pt.y) * sy };
-    cloneStampCanvas = document.createElement('canvas'); cloneStampCanvas.width = Math.max(2, Math.ceil(radiusPx * (sx + sy))); cloneStampCanvas.height = cloneStampCanvas.width; cloneStampCtx = cloneStampCanvas.getContext('2d')!;
-    paintClone(pt.x, pt.y);
-    return true;
+    cloneStampCanvas = document.createElement('canvas'); cloneStampCtx = cloneStampCanvas.getContext('2d')!;
+    isCloning = true; paintClone(pt.x, pt.y); return true;
   }
   function paintClone(x: number, y: number) {
-    if (!cloneCtx || !cloneSample || !cloneSource || !cloneOffset) return;
+    if (!isCloning || !cloneCtx || !cloneSample || !cloneOffset) return;
     const sx = p!.bitmap.width / W, sy = p!.bitmap.height / H;
     const cx = x * sx, cy = y * sy, r = radiusPx * (sx + sy) / 2;
     const dx = cloneOffset.x, dy = cloneOffset.y;
-    if (!cloneStampCanvas || !cloneStampCtx) return;
-    const size = cloneStampCanvas.width;
+    const size = Math.max(2, Math.ceil(2 * r));
+    if (!cloneStampCanvas || cloneStampCanvas.width !== size) {
+      cloneStampCanvas = document.createElement('canvas'); cloneStampCanvas.width = cloneStampCanvas.height = size;
+      cloneStampCtx = cloneStampCanvas.getContext('2d')!;
+    }
+    if (!cloneStampCtx || !cloneStampCanvas) return;
     cloneStampCtx.clearRect(0, 0, size, size);
+    cloneStampCtx.globalCompositeOperation = 'source-over';
     cloneStampCtx.drawImage(cloneSample, cx - r + dx, cy - r + dy, 2 * r, 2 * r, 0, 0, size, size);
     cloneStampCtx.globalCompositeOperation = 'destination-in';
-    const inner = r * cloneHardness, grad = cloneStampCtx.createRadialGradient(size/2, size/2, inner, size/2, size/2, size/2);
+    const inner = size * 0.5 * cloneHardness;
+    const grad = cloneStampCtx.createRadialGradient(size / 2, size / 2, inner, size / 2, size / 2, size / 2);
     grad.addColorStop(0, 'rgba(0,0,0,1)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
     cloneStampCtx.fillStyle = grad; cloneStampCtx.fillRect(0, 0, size, size);
     cloneStampCtx.globalCompositeOperation = 'source-over';
     cloneCtx.save(); cloneCtx.globalAlpha = cloneOpacity;
-    cloneCtx.drawImage(cloneStampCanvas, cx-r, cy-r, 2*r, 2*r); cloneCtx.restore();
+    cloneCtx.drawImage(cloneStampCanvas, cx - r, cy - r, 2 * r, 2 * r); cloneCtx.restore();
+    currentSourcePos = { x: x + cloneOffset.x / sx, y: y + cloneOffset.y / sy };
   }
   async function finishCloneStroke() {
-    if (!cloneCanvas || !cloneCtx) return;
-    try { p!.bitmap = await createImageBitmap(cloneCanvas); p!.rgba = workingCopy(p!.bitmap).rgba; projects.touch(p!); schedule(); }
-    catch { toast('تعذر تطبيق الاستنساخ', 'error'); }
-    cloneCanvas = cloneSample = cloneStampCanvas = null; cloneCtx = cloneSampleCtx = cloneStampCtx = null; cloneOffset = null;
+    if (!cloneCanvas || !cloneCtx) { isCloning = false; return; }
+    const finished = cloneCanvas;
+    try {
+      p!.bitmap = await createImageBitmap(finished); p!.rgba = workingCopy(p!.bitmap).rgba;
+      projects.touch(p!); schedule();
+    } catch { toast('تعذر تطبيق الاستنساخ', 'error'); }
+    isCloning = false; cloneCanvas = cloneSample = cloneStampCanvas = null;
+    cloneCtx = cloneSampleCtx = cloneStampCtx = null; currentSourcePos = null;
   }
 
   // --- viewport: zoom/pan changes only the preview, never the photo pixels or export dimensions
@@ -308,7 +354,7 @@ export function editorScreen(): Screen {
     if (cropDrag) { cropMove(pt); return; }
     if (drag && l) { l.cx = pt.x / W + drag.dx; l.cy = pt.y / H + drag.dy; schedule(); return; }
     if (fontDrag && sel) { sel.x1 = Math.max(0, Math.min(W, pt.x)); sel.y1 = Math.max(0, Math.min(H, pt.y)); schedule(); return; }
-    if (tool === 'clone' && last) { const dist = Math.hypot(pt.x-last.x, pt.y-last.y), stepPx = Math.max(1, radiusPx/4); for (let d=stepPx; d<=dist; d+=stepPx) paintClone(last.x+(pt.x-last.x)*d/dist,last.y+(pt.y-last.y)*d/dist); paintClone(pt.x,pt.y); last=pt; schedule(); return; }
+    if (tool === 'clone' && last && isCloning) { const dist = Math.hypot(pt.x-last.x, pt.y-last.y), stepPx = Math.max(1, radiusPx/4); for (let d=stepPx; d<=dist; d+=stepPx) paintClone(last.x+(pt.x-last.x)*d/dist,last.y+(pt.y-last.y)*d/dist); paintClone(pt.x,pt.y); last=pt; schedule(); return; }
     if (!last || (tool !== 'obj' && !p.mask)) return;
     const dist = Math.hypot(pt.x - last.x, pt.y - last.y), stepPx = Math.max(1, (radiusPx * pt.k) / 3);
     for (let d = stepPx; d <= dist; d += stepPx) stamp(last.x + ((pt.x - last.x) * d) / dist, last.y + ((pt.y - last.y) * d) / dist, pt.k);
@@ -639,7 +685,7 @@ export function editorScreen(): Screen {
     tool = next; exportSheet.hidden = true;
     cutPanel.hidden = !(next === 'cut' && p!.mask);
     bgPanel.hidden = next !== 'bg'; textPanel.hidden = next !== 'text'; objPanel.hidden = next !== 'obj'; fontPanel.hidden = next !== 'font';
-    editPanel.hidden = next !== 'edit'; cropPanel.hidden = next !== 'crop'; clonePanel.hidden = next !== 'clone'; if (next !== 'edit') { pick = -1; }
+    editPanel.hidden = next !== 'edit'; cropPanel.hidden = next !== 'crop'; clonePanel.hidden = next !== 'clone'; if (next !== 'clone') { cloneCursorPos = null; canvas.classList.remove('clone-pick-source'); } else if (choosingCloneSource) canvas.classList.add('clone-pick-source'); if (next !== 'edit') { pick = -1; }
     if (next === 'bg') renderBg(); if (next === 'text') renderText(); if (next === 'crop') renderCrop();
     strip.forEach(([b, k]) => b.setAttribute('aria-pressed', String(k === next))); schedule();
   }
