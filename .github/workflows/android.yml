@@ -39,6 +39,15 @@ jobs:
         run: npm run typecheck
         continue-on-error: true
       - run: npm run build
+      - name: Verify OCR models are packaged into the app
+        run: |
+          test -s public/models/ocr_det.onnx
+          test -s public/models/ocr_rec.onnx
+          test -s public/models/ocr_dict.txt
+          test -s dist/models/ocr_det.onnx
+          test -s dist/models/ocr_rec.onnx
+          test -s dist/models/ocr_dict.txt
+          ls -lh dist/models/ocr_det.onnx dist/models/ocr_rec.onnx dist/models/ocr_dict.txt
       - name: Create Android project
         run: test -f android/gradlew || npx cap add android
       - name: Add the MediaStore plugin (native code)
