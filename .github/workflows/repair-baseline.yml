@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/photo-editor-repair
+      - main
   workflow_dispatch: {}
 
 permissions:
