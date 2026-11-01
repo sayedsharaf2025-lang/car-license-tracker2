@@ -71,3 +71,7 @@ input[type="color"] { min-width: var(--tap-min); min-height: var(--tap-min); bor
 
 /* Clone stamp panel and touch-friendly controls */
 .clone-source-active { outline: 2px solid var(--color-accent); }
+
+/* Clone Stamp v2 visual feedback */
+.stage-canvas.clone-pick-source { cursor: crosshair; touch-action: none; }
+.stage-canvas { touch-action: none; }
