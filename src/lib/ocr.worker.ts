@@ -6,11 +6,25 @@ ort.env.wasm.numThreads = 1;
 const post = (m: unknown) => (self as unknown as Worker).postMessage(m);
 let det: ort.InferenceSession | null = null, rec: ort.InferenceSession | null = null, chars: string[] = [];
 
-async function bytes(url: string, min: number): Promise<ArrayBuffer> {
-  const r = await fetch(url);
-  const b = r.ok ? await r.arrayBuffer() : null;
-  if (!b || b.byteLength < min) throw Object.assign(new Error('model missing: ' + url), { code: 'model_missing' });
-  return b;
+async function bytes(path: string, min: number): Promise<ArrayBuffer> {
+  const name = path.split('/').pop() ?? path;
+  // Vite copies public/models into dist/models. Resolve relative to the bundled worker
+  // first (works for Android assets and sub-path hosting), then try the app root.
+  const candidates = [
+    new URL('../models/' + name, import.meta.url).href,
+    new URL('/models/' + name, self.location.href).href,
+  ];
+  let lastStatus = 'not found';
+  for (const url of [...new Set(candidates)]) {
+    try {
+      const r = await fetch(url, { cache: 'force-cache' });
+      if (!r.ok) { lastStatus = 'HTTP ' + r.status + ' at ' + url; continue; }
+      const b = await r.arrayBuffer();
+      if (b.byteLength >= min) return b;
+      lastStatus = 'file too small (' + b.byteLength + ' bytes) at ' + url;
+    } catch (err) { lastStatus = String(err); }
+  }
+  throw Object.assign(new Error('OCR model missing: ' + name + '. ' + lastStatus), { code: 'model_missing' });
 }
 
 self.onmessage = async (e: MessageEvent) => {
