@@ -1,28 +1,58 @@
 import type { Rect } from './ocrMath.ts';
-/** Reads text from an RGBA crop, on-device, in a worker. Rejects with code 'model_missing' when the OCR files are not in public/models. */
-export function readText(rgba: Uint8ClampedArray, w: number, h: number): Promise<string> {
-  const worker = new Worker(new URL('./ocr.worker.ts', import.meta.url), { type: 'module' });
-  return new Promise((resolve, reject) => {
-    worker.onmessage = (e: MessageEvent) => {
-      worker.terminate();
-      if (e.data.error) reject(Object.assign(new Error(e.data.error), { code: e.data.code }));
-      else resolve(e.data.text as string);
-    };
-    worker.onerror = (e) => { worker.terminate(); reject(Object.assign(new Error(e.message), { code: 'failed' })); };
-    worker.postMessage({ id: 1, rgba: rgba.slice(), w, h, mode: 'read' });
+
+// Keep one worker alive so ONNX models stay loaded between OCR actions.
+// A fresh worker per button press repeatedly downloads/parses large models.
+type Pending = { resolve: (value: string | { words: Rect[]; lines: Rect[] }) => void; reject: (reason: Error) => void; mode: 'read' | 'detect'; timer: ReturnType<typeof setTimeout> };
+let worker: Worker | null = null;
+let nextId = 1;
+const pending = new Map<number, Pending>();
+
+function failAll(error: Error) {
+  for (const item of pending.values()) { clearTimeout(item.timer); item.reject(error); }
+  pending.clear();
+  worker?.terminate(); worker = null;
+}
+function getWorker(): Worker {
+  if (worker) return worker;
+  const instance = new Worker(new URL('./ocr.worker.ts', import.meta.url), { type: 'module' });
+  worker = instance;
+  instance.onmessage = (e: MessageEvent) => {
+    const id = Number(e.data?.id), item = pending.get(id);
+    if (!item) return;
+    pending.delete(id); clearTimeout(item.timer);
+    if (e.data?.error) item.reject(Object.assign(new Error(String(e.data.error)), { code: e.data.code ?? 'failed' }));
+    else if (item.mode === 'read') item.resolve(String(e.data?.text ?? ''));
+    else item.resolve({ words: e.data?.words ?? [], lines: e.data?.lines ?? [] });
+  };
+  instance.onerror = (e) => failAll(Object.assign(new Error(e.message || 'OCR worker failed'), { code: 'failed' }));
+  instance.onmessageerror = () => failAll(Object.assign(new Error('Invalid OCR worker response'), { code: 'failed' }));
+  return instance;
+}
+function request(rgba: Uint8ClampedArray, w: number, h: number, mode: 'read' | 'detect') {
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || rgba.length !== w * h * 4) {
+    return Promise.reject(new RangeError('OCR image dimensions do not match pixel buffer'));
+  }
+  const id = nextId++, pixels = rgba.slice();
+  return new Promise<string | { words: Rect[]; lines: Rect[] }>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(Object.assign(new Error('OCR timed out; try a smaller crop'), { code: 'timeout' }));
+    }, 90000);
+    pending.set(id, { resolve, reject, mode, timer });
+    try { getWorker().postMessage({ id, rgba: pixels, w, h, mode }, [pixels.buffer]); }
+    catch (err) { clearTimeout(timer); pending.delete(id); reject(err); }
   });
 }
 
-/** Finds text areas (word boxes and line boxes, in image pixels) without reading them. Needs only the detector file (ocr_det.onnx). */
-export function detectText(rgba: Uint8ClampedArray, w: number, h: number): Promise<{ words: Rect[]; lines: Rect[] }> {
-  const worker = new Worker(new URL('./ocr.worker.ts', import.meta.url), { type: 'module' });
-  return new Promise((resolve, reject) => {
-    worker.onmessage = (e: MessageEvent) => {
-      worker.terminate();
-      if (e.data.error) reject(Object.assign(new Error(e.data.error), { code: e.data.code }));
-      else resolve({ words: e.data.words as Rect[], lines: e.data.lines as Rect[] });
-    };
-    worker.onerror = (e) => { worker.terminate(); reject(Object.assign(new Error(e.message), { code: 'failed' })); };
-    worker.postMessage({ id: 1, rgba: rgba.slice(), w, h, mode: 'detect' });
-  });
+/** On-device OCR. The shared worker keeps the Arabic models warm for subsequent requests. */
+export async function readText(rgba: Uint8ClampedArray, w: number, h: number): Promise<string> {
+  return await request(rgba, w, h, 'read') as string;
 }
+
+/** Finds text areas without reading them. Shares the same warm worker and detector model. */
+export async function detectText(rgba: Uint8ClampedArray, w: number, h: number): Promise<{ words: Rect[]; lines: Rect[] }> {
+  return await request(rgba, w, h, 'detect') as { words: Rect[]; lines: Rect[] };
+}
+
+/** Release the cached model worker when leaving the editor or explicitly resetting OCR. */
+export function disposeOCR() { failAll(new Error('OCR worker disposed')); }
