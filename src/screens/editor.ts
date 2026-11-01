@@ -767,17 +767,29 @@ export function editorScreen(): Screen {
   }
 
   // --- tools
-  function showTool(next: Tool) {
+  /** A task button is a real toggle: tap once to open its controls, tap it again to collapse them. */
+  function showTool(next: Tool | null) {
     if (next === 'bg' && !p!.mask) { toast(t.editor.needCutout); return; }
     tool = next; exportSheet.hidden = true;
-    cutPanel.hidden = !(next === 'cut' && p!.mask);
+    cutPanel.hidden = !(next === 'cut' && !!p!.mask);
     bgPanel.hidden = next !== 'bg'; textPanel.hidden = next !== 'text'; objPanel.hidden = next !== 'obj'; fontPanel.hidden = next !== 'font';
-    editPanel.hidden = next !== 'edit'; cropPanel.hidden = next !== 'crop'; clonePanel.hidden = next !== 'clone'; enhancePanel.hidden = next !== 'enhance'; if (next === 'enhance') renderEnhance(); if (next !== 'clone') { cloneCursorPos = null; canvas.classList.remove('clone-pick-source'); } else if (choosingCloneSource) canvas.classList.add('clone-pick-source'); if (next !== 'edit') { pick = -1; }
+    editPanel.hidden = next !== 'edit'; cropPanel.hidden = next !== 'crop'; clonePanel.hidden = next !== 'clone'; enhancePanel.hidden = next !== 'enhance';
+    if (next === 'enhance') renderEnhance();
+    if (next !== 'clone') { cloneCursorPos = null; canvas.classList.remove('clone-pick-source'); }
+    else if (choosingCloneSource) canvas.classList.add('clone-pick-source');
+    if (next !== 'edit') pick = -1;
     if (next === 'bg') renderBg(); if (next === 'text') renderText(); if (next === 'crop') renderCrop();
-    strip.forEach(([b, k]) => b.setAttribute('aria-pressed', String(k === next))); schedule();
+    strip.forEach(([b, k]) => {
+      b.setAttribute('aria-pressed', String(k !== null && k === next));
+      b.setAttribute('aria-expanded', String(k !== null && k === next));
+    });
+    schedule();
   }
   const mk = (label: string, k: Tool | null): [HTMLButtonElement, Tool | null] =>
-    [h('button', { class: 'tool', 'aria-pressed': String(k === 'cut'), onclick: () => (k ? showTool(k) : toast(t.editor.soon)) }, label), k];
+    [h('button', {
+      class: 'tool', 'aria-pressed': 'false', 'aria-expanded': 'false',
+      onclick: () => (k ? showTool(tool === k ? null : k) : toast(t.editor.soon))
+    }, label), k];
   const strip = [mk(t.tools.removeBg, 'cut'), mk(t.tools.background, 'bg'), mk(t.tools.text, 'text'), mk(t.tools.editText, 'edit'), mk(t.tools.removeObject, 'obj'), mk(t.tools.fonts, 'font'), mk(t.tools.crop, 'crop'), mk('استنساخ', 'clone'), mk('تحسين', 'enhance')];
 
   const el = h('main', { class: 'editor' },
