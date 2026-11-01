@@ -24,3 +24,27 @@ test('inpaint restores a flat colour hole', () => {
   assert.equal(px[(5 * w + 5) * 4], 100); assert.equal(px[(4 * w + 4) * 4 + 2], 200);
 });
 test('inpaint with no known pixels does not hang', () => { inpaint(new Uint8ClampedArray(16), 2, 2, new Uint8Array(4).fill(1)); assert.ok(true); });
+
+test('normalization preserves glyph proportions instead of stretching tall letters wide', () => {
+  const m = new Uint8Array(100 * 100);
+  for (let y = 10; y < 90; y++) for (let x = 45; x < 55; x++) m[y * 100 + x] = 1;
+  const n = normalizeInk(m, 100, 100)!;
+  let x0 = 160, x1 = -1, y0 = 64, y1 = -1;
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 160; x++) if (n.ink[y * 160 + x]) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  const ratio = (x1 - x0 + 1) / (y1 - y0 + 1);
+  assert.ok(ratio < 0.3, 'a narrow vertical glyph remains narrow');
+});
+test('adaptive threshold detects dark strokes over a brightness gradient', () => {
+  const w = 100, h = 40, gray = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) gray[y * w + x] = y >= 18 && y <= 21 ? 20 : Math.round(80 + x * 1.35);
+  const m = inkMask(gray, w, h);
+  assert.equal(m[20 * w + 5], 1);
+  assert.equal(m[20 * w + 95], 1);
+});
+test('adaptive threshold also detects light strokes on a dark background', () => {
+  const w = 100, h = 40, gray = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) gray[y * w + x] = y >= 18 && y <= 21 ? 245 : Math.round(180 - x * 1.1);
+  const m = inkMask(gray, w, h);
+  assert.equal(m[20 * w + 5], 1);
+  assert.equal(m[20 * w + 95], 1);
+});
