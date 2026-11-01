@@ -25,3 +25,19 @@ test('sharpen and denoise keep output dimensions and channel bounds', () => {
   assert.equal(out.length, input.length);
   assert.ok([...out].every((v) => v >= 0 && v <= 255));
 });
+
+test('edge-aware denoise smooths small noise but keeps a strong edge', () => {
+  const w = 5, h = 5, input = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) { input[i * 4] = 100; input[i * 4 + 1] = 100; input[i * 4 + 2] = 100; input[i * 4 + 3] = 255; }
+  const center = (2 * w + 2) * 4;
+  input[center] = input[center + 1] = input[center + 2] = 118;
+  const denoised = enhancePixels(input, w, h, { ...DEFAULT_ENHANCE, denoise: 100 });
+  assert.ok(denoised[center] < 118 && denoised[center] > 100);
+  input[center] = input[center + 1] = input[center + 2] = 245;
+  const edged = enhancePixels(input, w, h, { ...DEFAULT_ENHANCE, denoise: 100 });
+  assert.ok(edged[center] > 220);
+  assert.equal(edged[center + 3], 255);
+});
+test('enhancement rejects inconsistent image dimensions', () => {
+  assert.throws(() => enhancePixels(new Uint8ClampedArray(8), 2, 2, DEFAULT_ENHANCE), RangeError);
+});
