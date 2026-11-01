@@ -119,5 +119,15 @@ export function ctcDecode(logits: Float32Array, T: number, C: number, chars: str
 /** Arabic comes out in drawn (left-to-right) order: reverse it, then put Latin/number runs back. */
 export function fixArabicOrder(s: string): string {
   if (!/[\u0600-\u06FF]/.test(s)) return s;
-  return [...s].reverse().join('').replace(/[A-Za-z0-9][A-Za-z0-9.,:%/@-]*/g, (m) => [...m].reverse().join(''));
+  // In reversed Arabic output, harakat may appear before their base letter.
+  // Keep combining marks attached to the letter when restoring right-to-left order.
+  const clusters: string[] = [];
+  let pendingMarks = '';
+  for (const ch of s) {
+    if (/[\u064B-\u065F\u0670\u06D6-\u06ED]/u.test(ch)) pendingMarks += ch;
+    else { clusters.push(ch + pendingMarks); pendingMarks = ''; }
+  }
+  if (pendingMarks) clusters.push(pendingMarks);
+  const reversed = clusters.reverse().join('');
+  return reversed.replace(/[A-Za-z0-9][A-Za-z0-9.,:%/@-]*/g, (m) => [...m].reverse().join(''));
 }
