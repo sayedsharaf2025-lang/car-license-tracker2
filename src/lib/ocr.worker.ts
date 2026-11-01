@@ -27,7 +27,7 @@ async function bytes(path: string, min: number): Promise<ArrayBuffer> {
   throw Object.assign(new Error('OCR model missing: ' + name + '. ' + lastStatus), { code: 'model_missing' });
 }
 
-self.onmessage = async (e: MessageEvent) => {
+const handleMessage = async (e: MessageEvent) => {
   const { id, rgba, w, h, mode } = e.data as { id: number; rgba: Uint8ClampedArray; w: number; h: number; mode?: 'read' | 'detect' };
   try {
     if (!det) det = await ort.InferenceSession.create(new Uint8Array(await bytes('/models/ocr_det.onnx', 100_000)), { executionProviders: ['wasm'] });
@@ -74,4 +74,10 @@ self.onmessage = async (e: MessageEvent) => {
   } catch (err) {
     post({ id, error: String(err), code: (err as { code?: string }).code ?? 'failed' });
   }
+};
+
+// ONNX sessions are shared; process one request at a time to avoid concurrent runs on the same session.
+let requestQueue = Promise.resolve();
+self.onmessage = (e: MessageEvent) => {
+  requestQueue = requestQueue.then(() => handleMessage(e));
 };
