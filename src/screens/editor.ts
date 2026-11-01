@@ -176,6 +176,8 @@ export function editorScreen(): Screen {
   // --- text panel (S13)
   const textArea: HTMLTextAreaElement = h('textarea', { class: 'field', rows: 2, 'aria-label': t.text.input, onfocus: () => captureHistory(), oninput: () => { const l = cur(); if (l) { l.text = textArea.value || ' '; schedule(); } } });
   const textColor: HTMLInputElement = h('input', { type: 'color', value: '#ffffff', 'aria-label': t.text.color, onfocus: () => captureHistory(), oninput: () => { const l = cur(); if (l) { l.color = textColor.value; schedule(); } } });
+  const shadowColor: HTMLInputElement = h('input', { type: 'color', value: '#000000', 'aria-label': 'لون الظل', onfocus: () => captureHistory(), oninput: () => { const l = cur(); if (l) { l.shadowColor = shadowColor.value; schedule(); } } });
+  const strokeColor: HTMLInputElement = h('input', { type: 'color', value: '#000000', 'aria-label': 'لون الحدود', onfocus: () => captureHistory(), oninput: () => { const l = cur(); if (l) { l.strokeColor = strokeColor.value; schedule(); } } });
   const fontRow = h('div', { class: 'row fontrow' });
   const textPanel = h('section', { class: 'sheet', hidden: true });
   const cur = () => p.texts.find((x) => x.id === selected) ?? null;
@@ -193,13 +195,21 @@ export function editorScreen(): Screen {
       l ? slider(t.text.size, 3, 20, Math.round(l.size * 100), (v) => { l.size = v / 100; schedule(); }) : null,
       l ? slider('زاوية الدوران', 0, 360, Math.round(l.rotation ?? 0), (v) => { l.rotation = v; schedule(); }) : null,
       l ? h('div', { class: 'row' }, h('label', {}, t.text.color), textColor) : null,
+      l ? h('div', { class: 'row' }, h('label', {}, 'محاذاة النص'),
+        chip('يمين', l.align === 'right', () => { captureHistory(); l.align = 'right'; renderText(); schedule(); }),
+        chip('وسط', !l.align || l.align === 'center', () => { captureHistory(); l.align = 'center'; renderText(); schedule(); }),
+        chip('يسار', l.align === 'left', () => { captureHistory(); l.align = 'left'; renderText(); schedule(); })) : null,
+      l ? slider('قوة الظل', 0, 30, l.shadowBlur ?? 0, (v) => { l.shadowBlur = v; schedule(); }) : null,
+      l ? h('div', { class: 'row' }, h('label', {}, 'لون الظل'), shadowColor) : null,
+      l ? slider('سمك الحدود', 0, 10, l.strokeWidth ?? 0, (v) => { l.strokeWidth = v; schedule(); }) : null,
+      l ? h('div', { class: 'row' }, h('label', {}, 'لون الحدود'), strokeColor) : null,
       h('h3', {}, 'الطبقات'),
       ...p!.texts.map((layer) => h('div', { class: 'layer-row' },
         h('button', { class: 'chip', 'aria-pressed': String(layer.id === selected), onclick: () => { selected = layer.id; renderText(); schedule(); } }, layer.text.slice(0, 24) || 'نص فارغ'),
         h('button', { class: 'chip', 'aria-label': layer.visible === false ? 'إظهار الطبقة' : 'إخفاء الطبقة', onclick: () => { captureHistory(); layer.visible = layer.visible === false; renderText(); schedule(); } }, layer.visible === false ? 'إظهار' : 'إخفاء'),
         h('button', { class: 'chip', 'aria-label': 'حذف الطبقة', onclick: () => { captureHistory(); p!.texts = p!.texts.filter((x) => x.id !== layer.id); if (selected === layer.id) selected = null; renderText(); schedule(); } }, 'حذف'))),
       l ? h('button', { class: 'btn ghost', onclick: () => { captureHistory(); p!.texts = p!.texts.filter((x) => x.id !== l.id); selected = null; renderText(); schedule(); } }, t.text.del) : null);
-    if (l) { textArea.value = l.text; textColor.value = l.color; }
+    if (l) { textArea.value = l.text; textColor.value = l.color; shadowColor.value = l.shadowColor ?? '#000000'; strokeColor.value = l.strokeColor ?? '#000000'; }
   }
   function addText() {
     const l = { id: crypto.randomUUID(), text: t.text.sample, font: FONTS[0], size: 0.09, color: '#ffffff', cx: 0.5, cy: 0.5 };
