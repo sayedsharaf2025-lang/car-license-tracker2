@@ -1,0 +1,48 @@
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+h1 { font-size: var(--text-xl); line-height: var(--text-xl-line); margin: 0 0 var(--space-4); }
+h2 { font-size: var(--text-lg); line-height: var(--text-lg-line); margin: var(--space-5) 0 var(--space-2); }
+.muted { color: var(--color-text-muted); }
+.ok { color: var(--color-success); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.page { padding: var(--space-5); display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
+.recent { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); width: 100%; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: var(--tap-min); padding-inline: var(--space-5);
+  border-radius: var(--radius-md); border: 1px solid transparent; font: inherit; font-weight: 600; cursor: pointer; }
+.btn.primary { background: var(--color-accent); color: var(--color-on-accent); }
+.btn.secondary { background: var(--color-surface-raised); color: var(--color-text); border-color: var(--color-border); }
+.btn.ghost { background: transparent; color: var(--color-text); }
+.btn.small { min-height: 40px; }
+.btn:disabled { opacity: .5; cursor: default; }
+.icon-btn { min-width: var(--tap-min); min-height: var(--tap-min); border: 0; border-radius: var(--radius-md);
+  background: transparent; color: var(--color-text); font-size: var(--text-lg); cursor: pointer; }
+.icon-btn:disabled { opacity: .35; }
+.chip { min-height: 40px; padding-inline: var(--space-4); border-radius: var(--radius-pill); border: 1px solid var(--color-border-input);
+  background: transparent; color: var(--color-text); font: inherit; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); border-color: var(--color-accent); }
+
+.editor { display: flex; flex-direction: column; height: 100%; background: var(--color-bg); position: relative; }
+.topbar { display: flex; align-items: center; gap: var(--space-1); height: var(--top-bar); padding-inline: var(--space-2);
+  border-bottom: 1px solid var(--color-border); }
+.spacer { flex: 1; }
+.stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; position: relative; background-color: var(--color-canvas); overflow: hidden; }
+.checker { background-image: conic-gradient(var(--color-checker-a) 25%, transparent 0 50%, var(--color-checker-a) 0 75%, transparent 0); background-size: 16px 16px; background-color: var(--color-checker-b); }
+.stage-canvas { max-width: 100%; max-height: 100%; object-fit: contain; touch-action: none; }
+.actions { padding: var(--space-3) var(--space-4); display: flex; justify-content: center; }
+.overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3);
+  background: rgba(10, 11, 13, .72); }
+.sheet { padding: var(--space-4); background: var(--color-surface); border-top: 1px solid var(--color-border); max-height: 40vh; overflow: auto; display: grid; gap: var(--space-3); }
+.sheet[hidden], .overlay[hidden] { display: none; }
+.row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.row label { min-width: 96px; }
+.row input[type="range"] { flex: 1; min-height: var(--tap-min); accent-color: var(--color-accent); }
+.toolstrip { display: flex; gap: var(--space-1); overflow-x: auto; height: var(--tool-strip); padding-inline: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-bg); }
+.tool { min-width: 72px; border: 0; background: transparent; color: var(--color-text-muted); font: inherit; font-size: var(--text-xs); cursor: pointer;
+  border-bottom: 3px solid transparent; }
+.tool[aria-pressed="true"] { color: var(--color-accent); border-bottom-color: var(--color-accent); }
+
+.toasts { position: fixed; inset-inline: var(--space-4); bottom: calc(var(--tool-strip) + var(--space-4)); display: grid; gap: var(--space-2); z-index: 10; }
+.toast { padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--color-surface-raised); border: 1px solid var(--color-border); box-shadow: var(--shadow-pop); }
+.toast.error { border-color: var(--color-danger); }
