@@ -26,14 +26,7 @@ export function adjustPixels(src: Uint8ClampedArray, settings: EnhanceSettings):
     out[i + 1] = clamp(gray + (g - gray) * sat);
     out[i + 2] = clamp(gray + (b - gray) * sat);
   }
-  if (settings.denoise > 0) smoothPixels(out, src, settings.denoise / 100);
-  if (settings.sharpen > 0) sharpenPixels(out, settings.sharpen / 100);
   return out;
-}
-/** Edge-aware light smoothing: flat noise is reduced while strong local edges are retained. */
-function smoothPixels(out: Uint8ClampedArray, src: Uint8ClampedArray, amount: number): void {
-  const w = Math.round(Math.sqrt(src.length / 4)); // caller replaces this with dimension-aware path below
-  void w; void out; void src; void amount;
 }
 /** Dimension-aware filter entry point for the editor. */
 export function enhancePixels(src: Uint8ClampedArray, width: number, height: number, settings: EnhanceSettings): Uint8ClampedArray {
