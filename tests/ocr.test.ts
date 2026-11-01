@@ -38,6 +38,14 @@ test('scored CTC decoder returns text and a bounded confidence', () => {
   assert.equal(out.text, 'اب');
   assert.ok(out.confidence > 0.9 && out.confidence <= 1);
 });
+test('confident CTC blanks do not hide uncertain character predictions', () => {
+  const chars = buildChars('ا\\nب\\n'), C = 3, logits = new Float32Array(4 * C);
+  // Three confident blanks and one ambiguous non-blank character.
+  logits[0] = 9; logits[C] = 9; logits[2 * C] = 9;
+  logits[3 * C + 1] = 1; logits[3 * C + 2] = 0.9;
+  const out = ctcDecodeScored(logits, 4, C, chars);
+  assert.ok(out.confidence < 0.9);
+});
 test('recognition preprocessing adds crop margins and creates enhanced contrast variant', () => {
   const w = 200, h = 100, rgba = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) { const v = i % w > 80 && i % w < 120 ? 40 : 210; rgba[i * 4] = v; rgba[i * 4 + 1] = v; rgba[i * 4 + 2] = v; rgba[i * 4 + 3] = 255; }
