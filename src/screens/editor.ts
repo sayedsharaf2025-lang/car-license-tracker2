@@ -208,7 +208,7 @@ export function editorScreen(): Screen {
     const r = canvas.getBoundingClientRect();
     return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H, k: W / r.width };
   };
-  const stamp = (x: number, y: number, k: number) => (tool === 'obj' ? paintBrush(objMask, W, H, x, y, radiusPx * k, 0.8, objMode === 'rub' ? 'erase' : 'restore') : paintBrush(p.mask!, W, H, x, y, radiusPx * k, hardness, mode));
+  const stamp = (x: number, y: number, k: number) => (tool === 'obj' ? paintBrush(objMask, W, H, x, y, radiusPx * k, hardness, objMode === 'rub' ? 'erase' : 'restore') : paintBrush(p.mask!, W, H, x, y, radiusPx * k, hardness, mode));
   canvas.addEventListener('pointerdown', (e) => {
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 2) {
@@ -277,6 +277,7 @@ export function editorScreen(): Screen {
     objHint, prefetch,
     h('div', { class: 'row' }, objPaint, objRub),
     slider(t.editor.size, 6, 90, radiusPx, (v) => { radiusPx = v; }),
+    slider(t.editor.hardness, 0, 100, Math.round(hardness * 100), (v) => { hardness = v / 100; }),
     h('div', { class: 'row' },
       h('button', { class: 'btn primary', onclick: () => removeObject() }, t.obj.run),
       h('button', { class: 'btn ghost', onclick: () => { objMask.fill(0); schedule(); } }, t.obj.clear)),
