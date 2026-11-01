@@ -20,7 +20,7 @@ import { SHAPES, shapePath, type Shape, type Pt } from '../lib/shapes.ts';
 import { cropProject, resizeProject, undoGeometry } from '../lib/transform.ts';
 
 const UNDO_LIMIT = 10;
-type Tool = 'cut' | 'bg' | 'text' | 'obj' | 'font' | 'edit' | 'crop';
+type Tool = 'cut' | 'bg' | 'text' | 'obj' | 'font' | 'edit' | 'crop' | 'clone';
 
 // S04 editor + S05 remove background + S06 background + S13 text + S16 export.
 export function editorScreen(): Screen {
@@ -32,7 +32,7 @@ export function editorScreen(): Screen {
   let mode: BrushMode = 'erase';
   let radiusPx = 28, hardness = 0.7;
   let showOriginal = false;
-  type HistoryState = { mask: Uint8Array | null; texts: TextLayer[]; bg: Background; rgba?: Uint8ClampedArray };
+  type HistoryState = { mask: Uint8Array | null; texts: TextLayer[]; bg: Background; rgba?: Uint8ClampedArray; bitmapPixels?: Uint8ClampedArray; bitmapW?: number; bitmapH?: number };
   let undo: HistoryState[] = [], redo: HistoryState[] = [];
   let job: { cancel: () => void } | null = null;
   let raf = 0;
@@ -98,7 +98,7 @@ export function editorScreen(): Screen {
   const syncHistory = () => { undoBtn.disabled = !undo.length; redoBtn.disabled = !redo.length; };
   function snapshot(includePixels = false): HistoryState {
     return { mask: p!.mask?.slice() ?? null, texts: structuredClone(p!.texts), bg: p!.bg,
-      ...(includePixels ? { rgba: p!.rgba.slice() } : {}) };
+      ...(includePixels ? { rgba: p!.rgba.slice(), ...(() => { const c = document.createElement('canvas'); c.width = p!.bitmap.width; c.height = p!.bitmap.height; const x = c.getContext('2d', { willReadFrequently: true })!; x.drawImage(p!.bitmap, 0, 0); return { bitmapPixels: x.getImageData(0, 0, c.width, c.height).data.slice(), bitmapW: c.width, bitmapH: c.height }; })() } : {}) };
   }
   function captureHistory(includePixels = false) {
     undo.push(snapshot(includePixels));
@@ -112,6 +112,7 @@ export function editorScreen(): Screen {
     p!.mask = snap.mask?.slice() ?? null;
     p!.texts = structuredClone(snap.texts); p!.bg = snap.bg;
     if (snap.rgba) p!.rgba = snap.rgba.slice();
+    if (snap.bitmapPixels && snap.bitmapW && snap.bitmapH) { const c = document.createElement('canvas'); c.width = snap.bitmapW; c.height = snap.bitmapH; c.getContext('2d')!.putImageData(new ImageData(snap.bitmapPixels, snap.bitmapW, snap.bitmapH), 0, 0); void createImageBitmap(c).then((b) => { p!.bitmap = b; projects.touch(p!); }); }
     syncHistory(); renderText(); renderBg(); schedule(); projects.touch(p!);
   }
 
@@ -188,6 +189,61 @@ export function editorScreen(): Screen {
     loadFont(l.font).then(schedule); renderText(); schedule();
   }
 
+  // --- clone stamp: clone photo texture/background only; no text recognition or text-layer copying
+  let cloneSource: { x: number; y: number } | null = null;
+  let choosingCloneSource = true, cloneOpacity = 0.85, cloneHardness = 0.75;
+  let cloneCanvas: HTMLCanvasElement | null = null, cloneCtx: CanvasRenderingContext2D | null = null;
+  let cloneSample: HTMLCanvasElement | null = null, cloneSampleCtx: CanvasRenderingContext2D | null = null;
+  let cloneOffset: { x: number; y: number } | null = null;
+  const cloneSourceBtn = h('button', { class: 'btn primary', onclick: () => { choosingCloneSource = true; cloneSourceBtn.textContent = 'حدد المصدر على الصورة'; toast('اضغط على منطقة نظيفة لتحديد المصدر'); } }, 'حدد المصدر على الصورة');
+  const cloneClearBtn = h('button', { class: 'btn ghost', onclick: () => { cloneSource = null; choosingCloneSource = true; cloneSourceBtn.textContent = 'حدد المصدر على الصورة'; toast('تم مسح المصدر'); } }, 'مسح المصدر');
+  const clonePanel = h('section', { class: 'sheet', hidden: true },
+    h('p', { class: 'muted' }, 'استنساخ نسيج الخلفية أو أجزاء الصورة لترميم العيوب. اختر المصدر أولاً ثم ارسم فوق المنطقة المطلوبة.'),
+    h('div', { class: 'row' }, cloneSourceBtn, cloneClearBtn),
+    slider('حجم الفرشاة', 6, 120, radiusPx, (v) => { radiusPx = v; }),
+    slider('نعومة الحواف', 0, 100, Math.round(cloneHardness * 100), (v) => { cloneHardness = v / 100; }),
+    slider('شفافية الاستنساخ', 10, 100, Math.round(cloneOpacity * 100), (v) => { cloneOpacity = v / 100; }),
+    h('p', { class: 'muted' }, 'استخدم التكبير للمحاذاة الدقيقة. التراجع يعيد الصورة الأصلية قبل آخر ضربة.'));
+  function beginCloneStroke(pt: { x: number; y: number }) {
+    const bw = p!.bitmap.width, bh = p!.bitmap.height, sx = bw / W, sy = bh / H;
+    if (choosingCloneSource || !cloneSource) {
+      cloneSource = { x: pt.x, y: pt.y }; choosingCloneSource = false;
+      cloneSourceBtn.textContent = 'تغيير نقطة المصدر'; toast('تم تحديد المصدر. ارسم الآن في المكان المطلوب.'); schedule(); return false;
+    }
+    captureHistory(true);
+    cloneCanvas = document.createElement('canvas'); cloneCanvas.width = bw; cloneCanvas.height = bh;
+    cloneCtx = cloneCanvas.getContext('2d')!; cloneCtx.drawImage(p!.bitmap, 0, 0);
+    cloneSample = document.createElement('canvas'); cloneSample.width = bw; cloneSample.height = bh;
+    cloneSampleCtx = cloneSample.getContext('2d')!; cloneSampleCtx.drawImage(p!.bitmap, 0, 0);
+    cloneOffset = { x: (cloneSource.x - pt.x) * sx, y: (cloneSource.y - pt.y) * sy };
+    paintClone(pt.x, pt.y);
+    return true;
+  }
+  function paintClone(x: number, y: number) {
+    if (!cloneCtx || !cloneSample || !cloneSource || !cloneOffset) return;
+    const sx = p!.bitmap.width / W, sy = p!.bitmap.height / H;
+    const cx = x * sx, cy = y * sy, r = radiusPx * (sx + sy) / 2;
+    const dx = cloneOffset.x, dy = cloneOffset.y;
+    cloneCtx.save(); cloneCtx.beginPath(); cloneCtx.arc(cx, cy, r, 0, Math.PI * 2); cloneCtx.clip();
+    cloneCtx.globalAlpha = cloneOpacity;
+    if (cloneHardness < 0.98) {
+      const feather = r * (1 - cloneHardness);
+      cloneCtx.globalCompositeOperation = 'destination-out';
+      const grad = cloneCtx.createRadialGradient(cx, cy, Math.max(0, r - feather), cx, cy, r);
+      grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(0,0,0,1)');
+      cloneCtx.fillStyle = grad; cloneCtx.beginPath(); cloneCtx.arc(cx, cy, r, 0, Math.PI * 2); cloneCtx.fill();
+      cloneCtx.globalCompositeOperation = 'source-over';
+    }
+    cloneCtx.drawImage(cloneSample, cx - r + dx, cy - r + dy, 2 * r, 2 * r, cx - r, cy - r, 2 * r, 2 * r);
+    cloneCtx.restore();
+  }
+  async function finishCloneStroke() {
+    if (!cloneCanvas || !cloneCtx) return;
+    try { p!.bitmap = await createImageBitmap(cloneCanvas); p!.rgba = workingCopy(p!.bitmap).rgba; projects.touch(p!); schedule(); }
+    catch { toast('تعذر تطبيق الاستنساخ', 'error'); }
+    cloneCanvas = cloneSample = null; cloneCtx = cloneSampleCtx = null; cloneOffset = null;
+  }
+
   // --- viewport: zoom/pan changes only the preview, never the photo pixels or export dimensions
   let zoom = 1, panX = 0, panY = 0, panMode = false;
   const pointers = new Map<number, { x: number; y: number }>();
@@ -228,6 +284,7 @@ export function editorScreen(): Screen {
     }
     if (tool === 'font') { canvas.setPointerCapture(e.pointerId); sel = { x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y }; fontDrag = true; schedule(); return; }
     if (tool === 'obj') { canvas.setPointerCapture(e.pointerId); stamp(pt.x, pt.y, pt.k); last = pt; schedule(); return; }
+    if (tool === 'clone') { canvas.setPointerCapture(e.pointerId); if (beginCloneStroke(pt)) { last = pt; schedule(); } return; }
     if (tool === 'edit') { const i = detected.findIndex((r) => pt.x >= r.x0 && pt.x <= r.x1 && pt.y >= r.y0 && pt.y <= r.y1); if (i >= 0) void pickLine(i); return; }
     if (tool === 'crop') { cropDown(pt, e); return; }
     if (tool !== 'cut' || !p.mask || job) return;
@@ -250,6 +307,7 @@ export function editorScreen(): Screen {
     if (cropDrag) { cropMove(pt); return; }
     if (drag && l) { l.cx = pt.x / W + drag.dx; l.cy = pt.y / H + drag.dy; schedule(); return; }
     if (fontDrag && sel) { sel.x1 = Math.max(0, Math.min(W, pt.x)); sel.y1 = Math.max(0, Math.min(H, pt.y)); schedule(); return; }
+    if (tool === 'clone' && last) { const dist = Math.hypot(pt.x-last.x, pt.y-last.y), stepPx = Math.max(1, radiusPx/4); for (let d=stepPx; d<=dist; d+=stepPx) paintClone(last.x+(pt.x-last.x)*d/dist,last.y+(pt.y-last.y)*d/dist); paintClone(pt.x,pt.y); last=pt; schedule(); return; }
     if (!last || (tool !== 'obj' && !p.mask)) return;
     const dist = Math.hypot(pt.x - last.x, pt.y - last.y), stepPx = Math.max(1, (radiusPx * pt.k) / 3);
     for (let d = stepPx; d <= dist; d += stepPx) stamp(last.x + ((pt.x - last.x) * d) / dist, last.y + ((pt.y - last.y) * d) / dist, pt.k);
@@ -259,7 +317,7 @@ export function editorScreen(): Screen {
     const pe = e as PointerEvent; pointers.delete(pe.pointerId);
     if (pointers.size < 2) pinch = null;
     if (panPointer?.id === pe.pointerId) panPointer = null;
-    last = null; drag = null; fontDrag = false; cropUp();
+    last = null; drag = null; fontDrag = false; cropUp(); if (tool === 'clone' && cloneCanvas) void finishCloneStroke();
   });
 
   // --- remove object (S09): paint (or auto-select text), then fill with the MI-GAN model on the phone
@@ -580,13 +638,13 @@ export function editorScreen(): Screen {
     tool = next; exportSheet.hidden = true;
     cutPanel.hidden = !(next === 'cut' && p!.mask);
     bgPanel.hidden = next !== 'bg'; textPanel.hidden = next !== 'text'; objPanel.hidden = next !== 'obj'; fontPanel.hidden = next !== 'font';
-    editPanel.hidden = next !== 'edit'; cropPanel.hidden = next !== 'crop'; if (next !== 'edit') { pick = -1; }
+    editPanel.hidden = next !== 'edit'; cropPanel.hidden = next !== 'crop'; clonePanel.hidden = next !== 'clone'; if (next !== 'edit') { pick = -1; }
     if (next === 'bg') renderBg(); if (next === 'text') renderText(); if (next === 'crop') renderCrop();
     strip.forEach(([b, k]) => b.setAttribute('aria-pressed', String(k === next))); schedule();
   }
   const mk = (label: string, k: Tool | null): [HTMLButtonElement, Tool | null] =>
     [h('button', { class: 'tool', 'aria-pressed': String(k === 'cut'), onclick: () => (k ? showTool(k) : toast(t.editor.soon)) }, label), k];
-  const strip = [mk(t.tools.removeBg, 'cut'), mk(t.tools.background, 'bg'), mk(t.tools.text, 'text'), mk(t.tools.editText, 'edit'), mk(t.tools.removeObject, 'obj'), mk(t.tools.fonts, 'font'), mk(t.tools.crop, 'crop')];
+  const strip = [mk(t.tools.removeBg, 'cut'), mk(t.tools.background, 'bg'), mk(t.tools.text, 'text'), mk(t.tools.editText, 'edit'), mk(t.tools.removeObject, 'obj'), mk(t.tools.fonts, 'font'), mk(t.tools.crop, 'crop'), mk('استنساخ', 'clone')];
 
   const el = h('main', { class: 'editor' },
     h('header', { class: 'topbar' },
@@ -594,7 +652,7 @@ export function editorScreen(): Screen {
       h('div', { class: 'spacer' }), undoBtn, redoBtn, h('button', { class: 'btn primary small', onclick: openExport }, t.editor.export)),
     h('div', { class: 'stage checker' }, canvas, viewControls, overlay),
     h('div', { class: 'actions' }, runBtn),
-    cutPanel, bgPanel, textPanel, editPanel, objPanel, fontPanel, cropPanel, exportSheet,
+    cutPanel, bgPanel, textPanel, editPanel, objPanel, fontPanel, cropPanel, clonePanel, exportSheet,
     h('nav', { class: 'toolstrip', 'aria-label': 'tools' }, ...strip.map(([b]) => b)));
 
   applyView();
