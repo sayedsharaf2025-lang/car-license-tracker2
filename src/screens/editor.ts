@@ -120,7 +120,7 @@ export function editorScreen(): Screen {
   const slider = (label: string, min: number, max: number, val: number, on: (v: number) => void) => {
     const id = 's' + Math.random().toString(36).slice(2, 7);
     return h('div', { class: 'row' }, h('label', { for: id }, label),
-      h('input', { id, type: 'range', min, max, value: val, oninput: (e: Event) => on(Number((e.target as HTMLInputElement).value)) }));
+      h('input', { id, type: 'range', min, max, value: val, onpointerdown: () => { if (label === t.text.size || label === 'زاوية الدوران') captureHistory(); }, oninput: (e: Event) => on(Number((e.target as HTMLInputElement).value)) }));
   };
 
   // --- cut panel (S05)
