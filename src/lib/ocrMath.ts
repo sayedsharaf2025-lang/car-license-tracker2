@@ -47,14 +47,39 @@ export function groupLines(boxes: Rect[]): Rect[] {
 }
 
 /** Recognition input for one line: height 48, BGR, (v/255 - 0.5) / 0.5. */
-export function recPreprocess(rgba: Uint8ClampedArray, w: number, h: number, r: Rect) {
-  const x0 = Math.max(0, Math.floor(r.x0)), y0 = Math.max(0, Math.floor(r.y0));
-  const cw = Math.max(1, Math.min(w, Math.ceil(r.x1)) - x0), ch = Math.max(1, Math.min(h, Math.ceil(r.y1)) - y0);
+export function recPreprocess(rgba: Uint8ClampedArray, w: number, h: number, r: Rect, variant: 'original' | 'contrast' = 'original') {
+  // Add a small context margin: cropped dots and edge strokes are common OCR failure causes.
+  const mx = Math.max(2, Math.round((r.x1 - r.x0) * 0.025)), my = Math.max(2, Math.round((r.y1 - r.y0) * 0.10));
+  const x0 = Math.max(0, Math.floor(r.x0) - mx), y0 = Math.max(0, Math.floor(r.y0) - my);
+  const x1 = Math.min(w, Math.ceil(r.x1) + mx), y1 = Math.min(h, Math.ceil(r.y1) + my);
+  const cw = Math.max(1, x1 - x0), ch = Math.max(1, y1 - y0);
   const crop = new Uint8ClampedArray(cw * ch * 4);
   for (let y = 0; y < ch; y++) crop.set(rgba.subarray(((y0 + y) * w + x0) * 4, ((y0 + y) * w + x0 + cw) * 4), y * cw * 4);
   const rw = Math.min(2048, Math.max(16, Math.round((REC_H * cw) / ch))), px = resizeRGBABilinear(crop, cw, ch, rw, REC_H);
   const plane = rw * REC_H, data = new Float32Array(3 * plane);
-  for (let i = 0; i < plane; i++) for (let c = 0; c < 3; c++) data[c * plane + i] = (px[i * 4 + (2 - c)] / 255 - 0.5) / 0.5;
+  let lo = 0, hi = 255;
+  if (variant === 'contrast') {
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < plane; i++) {
+      const k = i * 4, gray = Math.round(0.299 * px[k] + 0.587 * px[k + 1] + 0.114 * px[k + 2]);
+      hist[gray]++;
+    }
+    const cut = Math.max(1, Math.floor(plane * 0.02));
+    let sum = 0; for (let i = 0; i < 256; i++) { sum += hist[i]; if (sum >= cut) { lo = i; break; } }
+    sum = 0; for (let i = 255; i >= 0; i--) { sum += hist[i]; if (sum >= cut) { hi = i; break; } }
+    if (hi - lo < 32) { lo = 0; hi = 255; }
+  }
+  for (let i = 0; i < plane; i++) {
+    const k = i * 4;
+    if (variant === 'original') {
+      for (let chn = 0; chn < 3; chn++) data[chn * plane + i] = (px[k + (2 - chn)] / 255 - 0.5) / 0.5;
+    } else {
+      const gray = 0.299 * px[k] + 0.587 * px[k + 1] + 0.114 * px[k + 2];
+      const stretched = Math.max(0, Math.min(255, ((gray - lo) * 255) / (hi - lo)));
+      const v = (stretched / 255 - 0.5) / 0.5;
+      data[i] = v; data[plane + i] = v; data[2 * plane + i] = v;
+    }
+  }
   return { data, rw };
 }
 
@@ -64,6 +89,21 @@ export const buildChars = (dictText: string): string[] => {
   if (lines[lines.length - 1] === '') lines.pop();
   return ['', ...lines, ' '];
 };
+
+export function ctcDecodeScored(logits: Float32Array, T: number, C: number, chars: string[]): { text: string; confidence: number } {
+  let prev = -1, out = '', score = 0, count = 0;
+  for (let t = 0; t < T; t++) {
+    let best = 0, bv = -Infinity, maxLogit = -Infinity;
+    for (let c = 0; c < C; c++) { const v = logits[t * C + c]; if (v > bv) { bv = v; best = c; } if (v > maxLogit) maxLogit = v; }
+    let denom = 0;
+    for (let c = 0; c < C; c++) denom += Math.exp(logits[t * C + c] - maxLogit);
+    const confidence = denom ? Math.exp(bv - maxLogit) / denom : 0;
+    score += confidence; count++;
+    if (best !== 0 && best !== prev) out += chars[best] ?? '';
+    prev = best;
+  }
+  return { text: out, confidence: count ? score / count : 0 };
+}
 
 export function ctcDecode(logits: Float32Array, T: number, C: number, chars: string[]): string {
   let prev = -1, out = '';
