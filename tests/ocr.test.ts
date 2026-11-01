@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { detBoxes, groupLines, ctcDecode, buildChars, fixArabicOrder, recPreprocess, detPreprocess } from '../src/lib/ocrMath.ts';
+import { detBoxes, groupLines, ctcDecode, ctcDecodeScored, buildChars, fixArabicOrder, recPreprocess, detPreprocess } from '../src/lib/ocrMath.ts';
 
 test('two words on one line become one line box; a lower line stays separate', () => {
   const w = 100, h = 60, p = new Float32Array(w * h);
@@ -25,4 +25,23 @@ test('preprocess shapes', () => {
   const rgba = new Uint8ClampedArray(200 * 100 * 4).fill(128);
   const d = detPreprocess(rgba, 200, 100); assert.equal(d.dw % 32, 0); assert.equal(d.data.length, 3 * d.dw * d.dh);
   const r = recPreprocess(rgba, 200, 100, { x0: 0, y0: 0, x1: 200, y1: 100 }); assert.equal(r.data.length, 3 * 48 * r.rw);
+});
+
+test('scored CTC decoder returns text and a bounded confidence', () => {
+  const chars = buildChars('ا\nب\n');
+  const seq = [1, 1, 0, 2], C = 4, logits = new Float32Array(seq.length * C);
+  seq.forEach((v, i) => { logits[i * C + v] = 8; });
+  const out = ctcDecodeScored(logits, seq.length, C, chars);
+  assert.equal(out.text, 'اب');
+  assert.ok(out.confidence > 0.9 && out.confidence <= 1);
+});
+test('recognition preprocessing adds crop margins and creates enhanced contrast variant', () => {
+  const w = 200, h = 100, rgba = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) { const v = i % w > 80 && i % w < 120 ? 40 : 210; rgba[i * 4] = v; rgba[i * 4 + 1] = v; rgba[i * 4 + 2] = v; rgba[i * 4 + 3] = 255; }
+  const rect = { x0: 90, y0: 30, x1: 110, y1: 70 };
+  const original = recPreprocess(rgba, w, h, rect, 'original');
+  const contrast = recPreprocess(rgba, w, h, rect, 'contrast');
+  assert.ok(original.rw > 16);
+  assert.equal(contrast.data.length, original.data.length);
+  assert.ok(contrast.data.every(Number.isFinite));
 });
