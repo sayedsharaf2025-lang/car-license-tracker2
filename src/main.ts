@@ -1,5 +1,6 @@
 import './styles/tokens.css';
 import './styles/app.css';
+import './styles/fonts.css';
 import { route, start } from './router.ts';
 import { homeScreen } from './screens/home.ts';
 import { editorScreen } from './screens/editor.ts';

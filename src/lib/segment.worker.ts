@@ -1,4 +1,4 @@
-import * as ort from 'onnxruntime-web';
+import * as ort from 'onnxruntime-web/wasm';
 import { MODEL_SIZE, resizeRGBABilinear, toTensorNCHW, postprocessMask, resizeMaskBilinear } from './maskMath.ts';
 
 ort.env.wasm.wasmPaths = '/ort/';

@@ -2,38 +2,44 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { MediaSaver } from './mediaSaver.ts';
+import { drawScene } from './scene.ts';
+import { loadFont } from './fonts.ts';
+import type { Project } from '../data/store.ts';
 import { fitSize, resizeMaskBilinear, compositeCutout } from './maskMath.ts';
 
 export const EXPORT_MAX_SIDE = 4096;
 
-export type Format = 'png' | 'jpg';
+export type Format = 'png' | 'jpg' | 'webp';
+export const MIME: Record<Format, string> = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' };
 
-/** Flattens the original photo + mask at (up to) full resolution into a file. */
-export async function renderExport(
-  bitmap: ImageBitmap, mask: Uint8Array, mw: number, mh: number, format: Format, quality: number,
-): Promise<Blob> {
-  const { w, h } = fitSize(bitmap.width, bitmap.height, EXPORT_MAX_SIDE);
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  const ctx = c.getContext('2d', { willReadFrequently: true })!;
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  const img = ctx.getImageData(0, 0, w, h);
-  const full = resizeMaskBilinear(mask, mw, mh, w, h);
-  compositeCutout(img.data, full, img.data); // in place: rgb stays, alpha = mask
-  ctx.putImageData(img, 0, 0);
+/** The export format that matches the photo that was opened (so a JPG stays a JPG). */
+export function formatOfMime(mime: string): Format {
+  return mime === 'image/jpeg' || mime === 'image/jpg' ? 'jpg' : mime === 'image/webp' ? 'webp' : 'png';
+}
 
-  let target = c;
-  if (format === 'jpg') {
-    target = document.createElement('canvas');
-    target.width = w; target.height = h;
-    const t = target.getContext('2d')!;
-    t.fillStyle = '#ffffff';
-    t.fillRect(0, 0, w, h);
-    t.drawImage(c, 0, 0);
-  }
+/** Composes background + cutout + text at (up to) full resolution into a file. */
+export async function renderExport(p: Project, format: Format, quality: number): Promise<Blob> {
+  const { w, h } = fitSize(p.bitmap.width, p.bitmap.height, EXPORT_MAX_SIDE);
+  const cut = document.createElement('canvas');
+  cut.width = w; cut.height = h;
+  const cctx = cut.getContext('2d', { willReadFrequently: true })!;
+  cctx.drawImage(p.bitmap, 0, 0, w, h);
+  const img = cctx.getImageData(0, 0, w, h);
+  compositeCutout(img.data, resizeMaskBilinear(p.mask ?? new Uint8Array(p.w * p.h).fill(255), p.w, p.h, w, h), img.data);
+  cctx.putImageData(img, 0, 0);
+
+  await Promise.all(p.texts.map((t) => loadFont(t.font)));
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const octx = out.getContext('2d')!;
+  if (format === 'jpg') { octx.fillStyle = '#ffffff'; octx.fillRect(0, 0, w, h); }
+  const layer = document.createElement('canvas');
+  layer.width = w; layer.height = h;
+  drawScene(layer.getContext('2d')!, w, h, p.bg, cut, p.texts);
+  octx.drawImage(layer, 0, 0);
   return new Promise((resolve, reject) =>
-    target.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))),
-      format === 'png' ? 'image/png' : 'image/jpeg', quality));
+    out.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))),
+      MIME[format], format === 'png' ? undefined : quality));
 }
 
 function blobToBase64(blob: Blob): Promise<string> {

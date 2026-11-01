@@ -1,201 +1,537 @@
 import { h, setChildren, toast } from '../ui.ts';
 import { t } from '../copy.ts';
-import { go, type Screen } from '../router.ts';
+import { go, reload, type Screen } from '../router.ts';
 import { projects } from '../data/store.ts';
-import { compositeCutout, paintBrush, type BrushMode } from '../lib/maskMath.ts';
+import { compositeCutout, paintBrush, resizeMaskBilinear, type BrushMode } from '../lib/maskMath.ts';
+import { inpaint } from '../lib/inpaint.ts';
+import { fillHoles, prepareMigan, miganStatus, MiganError, type MiganStage } from '../lib/migan.ts';
+import { findFonts, cropSel, type Sel } from '../lib/fontFinder.ts';
+import { readText, detectText } from '../lib/ocr.ts';
+import { workingCopy } from '../lib/image.ts';
 import { segment, SegmentError } from '../lib/segment.ts';
-import { renderExport, saveFile, shareBlob, type Format, type Saved } from '../lib/export.ts';
+import { renderExport, saveFile, shareBlob, formatOfMime, type Format, type Saved } from '../lib/export.ts';
+import { drawScene, hitTest, type Box } from '../lib/scene.ts';
+import { FONTS, fontsFor, loadFont, scriptOf, fontCss } from '../lib/fonts.ts';
+import { paintRects, padRect, inkColor } from '../lib/inpaintMath.ts';
+import { toGray, inkMask } from '../lib/fontMatch.ts';
+import type { Rect } from '../lib/ocrMath.ts';
+import { clampRect, moveRect, nearestCorner, dragCorner, aspectBox, polyBBox, type CRect, type Corner } from '../lib/geometry.ts';
+import { SHAPES, shapePath, type Shape, type Pt } from '../lib/shapes.ts';
+import { cropProject, resizeProject, undoGeometry } from '../lib/transform.ts';
 
-const UNDO_LIMIT = 10; // snapshot-based for the first slice; a stroke list replaces this later
+const UNDO_LIMIT = 10;
+type Tool = 'cut' | 'bg' | 'text' | 'obj' | 'font' | 'edit' | 'crop';
 
-// S04 editor + S05 remove background + S16 export.
+// S04 editor + S05 remove background + S06 background + S13 text + S16 export.
 export function editorScreen(): Screen {
   const p = projects.current();
   if (!p) { queueMicrotask(() => go('/')); return { el: h('div') }; }
-
   const W = p.w, H = p.h;
+
+  let tool: Tool = 'cut';
   let mode: BrushMode = 'erase';
-  let radiusPx = 28;      // screen pixels
-  let hardness = 0.7;
+  let radiusPx = 28, hardness = 0.7;
   let showOriginal = false;
-  let undo: Uint8Array[] = [];
-  let redo: Uint8Array[] = [];
+  let undo: Uint8Array[] = [], redo: Uint8Array[] = [];
   let job: { cancel: () => void } | null = null;
   let raf = 0;
+  let boxes: Box[] = [];
+  let selected: string | null = null;
+  const objMask = new Uint8Array(W * H);
+  let sel: Sel | null = null;
+  let objMode: 'paint' | 'rub' = 'paint';
+  let detected: Rect[] = [], pick = -1;
+  let crop: CRect = { x0: 0, y0: 0, x1: W, y1: H };
+  let cropShape: Shape = 'rect', cropRound = 0.25, cropAspect: number | null = null;
+  let freePts: Pt[] = [];
+  let cropDrag: { kind: 'move' | 'corner' | 'free'; corner?: Corner; sx: number; sy: number; start: CRect } | null = null;
+  const ovCanvas = document.createElement('canvas'); ovCanvas.width = W; ovCanvas.height = H;
+  const ovFrame = new ImageData(W, H);
 
   const canvas = h('canvas', { class: 'stage-canvas', width: W, height: H, 'aria-label': p.title, role: 'img' });
   const ctx = canvas.getContext('2d')!;
+  const cutCanvas = document.createElement('canvas');
+  cutCanvas.width = W; cutCanvas.height = H;
+  const cutCtx = cutCanvas.getContext('2d')!;
   const frame = new ImageData(W, H);
 
   function draw() {
     raf = 0;
-    if (p!.mask && !showOriginal) compositeCutout(p!.rgba, p!.mask, frame.data);
-    else frame.data.set(p!.rgba);
-    ctx.putImageData(frame, 0, 0);
+    if (p!.mask && !showOriginal) compositeCutout(p!.rgba, p!.mask, frame.data); else frame.data.set(p!.rgba);
+    cutCtx.putImageData(frame, 0, 0);
+    boxes = drawScene(ctx, W, H, showOriginal ? { kind: 'transparent' } : p!.bg, cutCanvas, showOriginal ? [] : p!.texts);
+    if (tool === 'obj') {
+      for (let i = 0; i < objMask.length; i++) { const a = objMask[i] > 127 ? 150 : 0; ovFrame.data[i * 4] = 255; ovFrame.data[i * 4 + 1] = 60; ovFrame.data[i * 4 + 2] = 60; ovFrame.data[i * 4 + 3] = a; }
+      ovCanvas.getContext('2d')!.putImageData(ovFrame, 0, 0); ctx.drawImage(ovCanvas, 0, 0);
+    }
+    if (tool === 'edit') detected.forEach((r, i) => { ctx.strokeStyle = i === pick ? '#ffd23d' : '#3ddc97'; ctx.lineWidth = Math.max(i === pick ? 4 : 2, W / 400); ctx.strokeRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0); });
+    if (tool === 'crop') drawCropOverlay();
+    if (tool === 'font' && sel) { ctx.strokeStyle = '#3ddc97'; ctx.lineWidth = Math.max(2, W / 300); ctx.setLineDash([12, 8]); ctx.strokeRect(sel.x0, sel.y0, sel.x1 - sel.x0, sel.y1 - sel.y0); ctx.setLineDash([]); }
+    const b = boxes.find((x) => x.id === selected);
+    if (b && tool === 'text') { ctx.strokeStyle = '#5b8def'; ctx.lineWidth = Math.max(2, W / 300); ctx.strokeRect(b.x0 - 6, b.y0 - 6, b.x1 - b.x0 + 12, b.y1 - b.y0 + 12); }
+  }
+  function drawCropOverlay() {
+    const c = crop, lw = Math.max(2, W / 300), free = cropShape === 'free';
+    const outline = free ? shapePath('free', 0, 0, 0, 0, 0, freePts) : shapePath(cropShape, c.x0, c.y0, c.x1 - c.x0, c.y1 - c.y0, cropRound);
+    if (!free || freePts.length > 2) {
+      const dim = new Path2D(); const full = new Path2D(); full.rect(0, 0, W, H); dim.addPath(full); dim.addPath(outline);
+      ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fill(dim, 'evenodd'); ctx.restore();
+    }
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = lw; ctx.setLineDash([14, 8]);
+    if (free && freePts.length > 1 && freePts.length < 3) { ctx.beginPath(); ctx.moveTo(freePts[0].x, freePts[0].y); ctx.lineTo(freePts[1].x, freePts[1].y); ctx.stroke(); } else ctx.stroke(outline);
+    ctx.setLineDash([]);
+    if (free && !cropDrag && freePts.length < 3) return;
+    ctx.strokeStyle = '#5b8def'; ctx.strokeRect(c.x0, c.y0, c.x1 - c.x0, c.y1 - c.y0);
+    if (free) return;
+    const hs = Math.max(14, W / 40); ctx.fillStyle = '#5b8def';
+    for (const [x, y] of [[c.x0, c.y0], [c.x1, c.y0], [c.x0, c.y1], [c.x1, c.y1]]) ctx.fillRect(x - hs / 2, y - hs / 2, hs, hs);
   }
   const schedule = () => { if (!raf) raf = requestAnimationFrame(draw); };
 
-  // --- top bar
+  // top bar
   const undoBtn = h('button', { class: 'icon-btn', 'aria-label': t.editor.undo, disabled: true, onclick: () => step(undo, redo) }, '↶');
   const redoBtn = h('button', { class: 'icon-btn', 'aria-label': t.editor.redo, disabled: true, onclick: () => step(redo, undo) }, '↷');
-  const exportBtn = h('button', { class: 'btn primary small', onclick: () => openExport() }, t.editor.export);
   const syncHistory = () => { undoBtn.disabled = !undo.length; redoBtn.disabled = !redo.length; };
   function step(from: Uint8Array[], to: Uint8Array[]) {
     const snap = from.pop();
     if (!snap || !p!.mask) return;
-    to.push(p!.mask.slice());
-    p!.mask.set(snap);
-    syncHistory(); schedule();
+    to.push(p!.mask.slice()); p!.mask.set(snap); syncHistory(); schedule();
   }
 
-  // --- brush panel (S05)
-  const modeBtn = (m: BrushMode, label: string): HTMLButtonElement => {
-    const b = h('button', { class: 'chip', 'aria-pressed': String(mode === m), onclick: () => {
-      mode = m; modeErase.setAttribute('aria-pressed', String(m === 'erase')); modeRestore.setAttribute('aria-pressed', String(m === 'restore'));
-    } }, label);
-    return b;
-  };
-  const modeErase: HTMLButtonElement = modeBtn('erase', t.editor.erase);
-  const modeRestore: HTMLButtonElement = modeBtn('restore', t.editor.restore);
+  const chip = (label: string, pressed: boolean, on: () => void): HTMLButtonElement =>
+    h('button', { class: 'chip', 'aria-pressed': String(pressed), onclick: on }, label);
   const slider = (label: string, min: number, max: number, val: number, on: (v: number) => void) => {
     const id = 's' + Math.random().toString(36).slice(2, 7);
-    return h('div', { class: 'row' },
-      h('label', { for: id }, label),
+    return h('div', { class: 'row' }, h('label', { for: id }, label),
       h('input', { id, type: 'range', min, max, value: val, oninput: (e: Event) => on(Number((e.target as HTMLInputElement).value)) }));
   };
-  const compareBtn = h('button', { class: 'btn secondary', 'aria-label': t.editor.holdOriginal }, t.editor.holdOriginal);
+
+  // --- cut panel (S05)
+  const modeErase: HTMLButtonElement = chip(t.editor.erase, true, () => setMode('erase'));
+  const modeRestore: HTMLButtonElement = chip(t.editor.restore, false, () => setMode('restore'));
+  function setMode(m: BrushMode) { mode = m; modeErase.setAttribute('aria-pressed', String(m === 'erase')); modeRestore.setAttribute('aria-pressed', String(m === 'restore')); }
+  const compareBtn = h('button', { class: 'btn secondary' }, t.editor.holdOriginal);
   const hold = (on: boolean) => () => { showOriginal = on; schedule(); };
   compareBtn.addEventListener('pointerdown', hold(true));
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) compareBtn.addEventListener(ev, hold(false));
-
-  const brushPanel = h('section', { class: 'sheet', hidden: true, 'aria-label': t.editor.removeBg },
+  const cutPanel = h('section', { class: 'sheet', hidden: true },
     h('div', { class: 'row' }, modeErase, modeRestore),
     slider(t.editor.size, 6, 90, radiusPx, (v) => { radiusPx = v; }),
-    slider(t.editor.hardness, 0, 100, Math.round(hardness * 100), (v) => { hardness = v / 100; }),
-    compareBtn);
+    slider(t.editor.hardness, 0, 100, 70, (v) => { hardness = v / 100; }), compareBtn);
 
-  // --- brush input
-  let last: { x: number; y: number } | null = null;
+  // --- background panel (S06)
+  const colorInput: HTMLInputElement = h('input', { type: 'color', value: '#ffffff', 'aria-label': t.bg.color, oninput: () => { p.bg = { kind: 'color', color: colorInput.value }; renderBg(); schedule(); } });
+  const imageInput: HTMLInputElement = h('input', { type: 'file', accept: 'image/*', class: 'visually-hidden', id: 'bg-input', onchange: async () => {
+    const f = imageInput.files?.[0]; imageInput.value = '';
+    if (!f) return;
+    try { p.bg = { kind: 'image', bitmap: await createImageBitmap(f, { imageOrientation: 'from-image' }) }; renderBg(); schedule(); }
+    catch { toast(t.bg.failed, 'error'); }
+  } });
+  const bgPanel = h('section', { class: 'sheet', hidden: true });
+  function renderBg() {
+    setChildren(bgPanel,
+      h('div', { class: 'row' },
+        chip(t.bg.transparent, p!.bg.kind === 'transparent', () => { p!.bg = { kind: 'transparent' }; renderBg(); schedule(); }),
+        chip(t.bg.color, p!.bg.kind === 'color', () => { p!.bg = { kind: 'color', color: colorInput.value }; renderBg(); schedule(); }),
+        colorInput),
+      h('div', { class: 'row' }, h('label', { class: 'btn secondary', for: 'bg-input' }, t.bg.pickImage), imageInput));
+  }
+
+  // --- text panel (S13)
+  const textArea: HTMLTextAreaElement = h('textarea', { class: 'field', rows: 2, 'aria-label': t.text.input, oninput: () => { const l = cur(); if (l) { l.text = textArea.value || ' '; schedule(); } } });
+  const textColor: HTMLInputElement = h('input', { type: 'color', value: '#ffffff', 'aria-label': t.text.color, oninput: () => { const l = cur(); if (l) { l.color = textColor.value; schedule(); } } });
+  const fontRow = h('div', { class: 'row fontrow' });
+  const textPanel = h('section', { class: 'sheet', hidden: true });
+  const cur = () => p.texts.find((x) => x.id === selected) ?? null;
+  function renderText() {
+    const l = cur();
+    const first = fontsFor(l?.text ?? 'ن');
+    fontRow.replaceChildren(...[...first, ...FONTS.filter((f) => !first.includes(f))].map((f) => {
+      const b = chip(f, l?.font === f, () => { if (l) { l.font = f; loadFont(f).then(schedule); renderText(); schedule(); } });
+      b.style.fontFamily = `"${f}", sans-serif`; return b;
+    }));
+    setChildren(textPanel,
+      h('button', { class: 'btn primary', onclick: addText }, t.text.add),
+      l ? textArea : h('p', { class: 'muted' }, t.text.hint),
+      l ? fontRow : null,
+      l ? slider(t.text.size, 3, 20, Math.round(l.size * 100), (v) => { l.size = v / 100; schedule(); }) : null,
+      l ? h('div', { class: 'row' }, h('label', {}, t.text.color), textColor) : null,
+      l ? h('button', { class: 'btn ghost', onclick: () => { p!.texts = p!.texts.filter((x) => x.id !== l.id); selected = null; renderText(); schedule(); } }, t.text.del) : null);
+    if (l) { textArea.value = l.text; textColor.value = l.color; }
+  }
+  function addText() {
+    const l = { id: crypto.randomUUID(), text: t.text.sample, font: FONTS[0], size: 0.09, color: '#ffffff', cx: 0.5, cy: 0.5 };
+    p!.texts.push(l); selected = l.id;
+    loadFont(l.font).then(schedule); renderText(); schedule();
+  }
+
+  // --- pointer input: brush (cut tool) or move text (text tool)
+  let fontDrag = false;
+  let last: { x: number; y: number } | null = null, drag: { dx: number; dy: number } | null = null;
   const toImage = (e: PointerEvent) => {
     const r = canvas.getBoundingClientRect();
     return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H, k: W / r.width };
   };
-  function stamp(x: number, y: number, k: number) {
-    paintBrush(p!.mask!, W, H, x, y, radiusPx * k, hardness, mode);
-  }
+  const stamp = (x: number, y: number, k: number) => (tool === 'obj' ? paintBrush(objMask, W, H, x, y, radiusPx * k, 0.8, objMode === 'rub' ? 'erase' : 'restore') : paintBrush(p.mask!, W, H, x, y, radiusPx * k, hardness, mode));
   canvas.addEventListener('pointerdown', (e) => {
-    if (!p.mask || job) return;
+    const pt = toImage(e);
+    if (tool === 'text') {
+      selected = hitTest(boxes, pt.x, pt.y);
+      const l = cur();
+      if (l) { canvas.setPointerCapture(e.pointerId); drag = { dx: l.cx - pt.x / W, dy: l.cy - pt.y / H }; }
+      renderText(); schedule(); return;
+    }
+    if (tool === 'font') { canvas.setPointerCapture(e.pointerId); sel = { x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y }; fontDrag = true; schedule(); return; }
+    if (tool === 'obj') { canvas.setPointerCapture(e.pointerId); stamp(pt.x, pt.y, pt.k); last = pt; schedule(); return; }
+    if (tool === 'edit') { const i = detected.findIndex((r) => pt.x >= r.x0 && pt.x <= r.x1 && pt.y >= r.y0 && pt.y <= r.y1); if (i >= 0) void pickLine(i); return; }
+    if (tool === 'crop') { cropDown(pt, e); return; }
+    if (tool !== 'cut' || !p.mask || job) return;
     canvas.setPointerCapture(e.pointerId);
     undo.push(p.mask.slice()); if (undo.length > UNDO_LIMIT) undo.shift();
-    redo = []; syncHistory();
-    const pt = toImage(e);
-    stamp(pt.x, pt.y, pt.k); last = pt; schedule();
+    redo = []; syncHistory(); stamp(pt.x, pt.y, pt.k); last = pt; schedule();
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (!last || !p.mask) return;
     const pt = toImage(e);
-    const dist = Math.hypot(pt.x - last.x, pt.y - last.y);
-    const stepPx = Math.max(1, (radiusPx * pt.k) / 3);
+    const l = cur();
+    if (cropDrag) { cropMove(pt); return; }
+    if (drag && l) { l.cx = pt.x / W + drag.dx; l.cy = pt.y / H + drag.dy; schedule(); return; }
+    if (fontDrag && sel) { sel.x1 = Math.max(0, Math.min(W, pt.x)); sel.y1 = Math.max(0, Math.min(H, pt.y)); schedule(); return; }
+    if (!last || (tool !== 'obj' && !p.mask)) return;
+    const dist = Math.hypot(pt.x - last.x, pt.y - last.y), stepPx = Math.max(1, (radiusPx * pt.k) / 3);
     for (let d = stepPx; d <= dist; d += stepPx) stamp(last.x + ((pt.x - last.x) * d) / dist, last.y + ((pt.y - last.y) * d) / dist, pt.k);
-    stamp(pt.x, pt.y, pt.k);
-    last = pt; schedule();
+    stamp(pt.x, pt.y, pt.k); last = pt; schedule();
   });
-  for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, () => { last = null; });
+  for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, () => { last = null; drag = null; fontDrag = false; cropUp(); });
 
-  // --- remove background (runs in a worker)
-  const overlayText = h('p', {}, t.editor.working);
-  const overlay = h('div', { class: 'overlay', hidden: true, role: 'status' },
-    overlayText,
+  // --- remove object (S09): paint (or auto-select text), then fill with the MI-GAN model on the phone
+  const setOverlay = (msg: string) => { (overlay.firstChild as HTMLElement).textContent = msg; };
+  const stageText = (st: MiganStage) => setOverlay(st.stage === 'download'
+    ? `${t.obj.downloading} ${st.total ? Math.round((100 * st.loaded) / st.total) + '%' : Math.round(st.loaded / 1e6) + ' MB'}`
+    : st.stage === 'init' ? t.obj.init : t.obj.working);
+  const objHint = h('p', { class: 'muted' }, t.obj.hint);
+  const objPaint: HTMLButtonElement = chip(t.obj.paint, true, () => setObjMode('paint'));
+  const objRub: HTMLButtonElement = chip(t.obj.rub, false, () => setObjMode('rub'));
+  function setObjMode(m: 'paint' | 'rub') { objMode = m; objPaint.setAttribute('aria-pressed', String(m === 'paint')); objRub.setAttribute('aria-pressed', String(m === 'rub')); }
+  const prefetch = h('button', { class: 'btn secondary', hidden: true, onclick: () => predownload() }, t.obj.predownload);
+  void miganStatus().then((st) => { if (st === 'download') { objHint.textContent = t.obj.hintDownload; prefetch.hidden = false; } });
+  const objPanel = h('section', { class: 'sheet', hidden: true },
+    objHint, prefetch,
+    h('div', { class: 'row' }, objPaint, objRub),
+    slider(t.editor.size, 6, 90, radiusPx, (v) => { radiusPx = v; }),
+    h('div', { class: 'row' },
+      h('button', { class: 'btn primary', onclick: () => removeObject() }, t.obj.run),
+      h('button', { class: 'btn ghost', onclick: () => { objMask.fill(0); schedule(); } }, t.obj.clear)),
+    h('button', { class: 'btn secondary', onclick: () => autoSelectText() }, t.obj.autoText));
+
+  async function predownload() {
+    overlay.hidden = false; setOverlay(t.obj.downloading);
+    const j = prepareMigan(stageText); job = j;
+    try { await j.promise; prefetch.hidden = true; objHint.textContent = t.obj.hint; toast(t.obj.ready); }
+    catch (err) { if (!(err instanceof MiganError && err.code === 'cancelled')) toast(t.obj.downloadFailed, 'error'); }
+    finally { job = null; overlay.hidden = true; setOverlay(t.editor.working); }
+  }
+
+  /** AI fill; if the model cannot run (offline on first use, etc.) the old simple fill is used so the tool never dead-ends. */
+  async function fillAI(fw: number, fh: number, rgba: Uint8ClampedArray, hole: Uint8Array): Promise<Uint8ClampedArray> {
+    const j = fillHoles(rgba, fw, fh, hole, stageText); job = j;
+    try { return await j.promise; }
+    catch (err) {
+      if (err instanceof MiganError && err.code === 'cancelled') throw err;
+      toast(err instanceof MiganError && err.code === 'download_failed' ? t.obj.downloadFailed : t.obj.fallback, 'error');
+      const copy = rgba.slice(); inpaint(copy, fw, fh, hole); return copy;
+    } finally { job = null; }
+  }
+
+  /** Runs the fill on the full-size photo. `holeFn` builds the hole mask (1 = fill) at the photo's real size. */
+  async function eraseRegion(holeFn: (fw: number, fh: number) => Uint8Array): Promise<boolean> {
+    overlay.hidden = false; setOverlay(t.obj.working);
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      const fw = p!.bitmap.width, fh = p!.bitmap.height;
+      const c = document.createElement('canvas'); c.width = fw; c.height = fh;
+      const cx = c.getContext('2d', { willReadFrequently: true })!; cx.drawImage(p!.bitmap, 0, 0);
+      const img = cx.getImageData(0, 0, fw, fh);
+      img.data.set(await fillAI(fw, fh, img.data, holeFn(fw, fh))); cx.putImageData(img, 0, 0);
+      p!.bitmap = await createImageBitmap(c); p!.rgba = workingCopy(p!.bitmap).rgba; projects.touch(p!);
+      return true;
+    } catch (err) {
+      if (!(err instanceof MiganError && err.code === 'cancelled')) toast(t.obj.failed, 'error');
+      return false;
+    } finally { overlay.hidden = true; setOverlay(t.editor.working); }
+  }
+
+  async function removeObject() {
+    if (job || !objMask.some((v) => v > 127)) { toast(t.obj.empty); return; }
+    const ok = await eraseRegion((fw, fh) => {
+      const big = resizeMaskBilinear(objMask, W, H, fw, fh), hole = new Uint8Array(fw * fh);
+      for (let i = 0; i < hole.length; i++) hole[i] = big[i] > 40 ? 1 : 0;
+      return hole;
+    });
+    if (ok) { objMask.fill(0); schedule(); }
+  }
+
+  async function autoSelectText() {
+    if (job) return;
+    overlay.hidden = false; setOverlay(t.edit.detecting);
+    try {
+      const { words } = await detectText(p!.rgba, W, H);
+      if (!words.length) { toast(t.obj.noText); return; }
+      const pad = Math.max(3, Math.round(W / 300));
+      paintRects(objMask, W, H, words.map((r) => padRect(r, pad, W, H)));
+      schedule(); toast(t.obj.textMarked);
+    } catch (err) { toast((err as { code?: string }).code === 'model_missing' ? t.edit.detMissing : t.obj.failed, 'error'); }
+    finally { overlay.hidden = true; setOverlay(t.editor.working); }
+  }
+
+  // --- edit text inside the photo (new): detect lines, read one, erase it with the model, put back text in a matching font/colour/size
+  const origField: HTMLTextAreaElement = h('textarea', { class: 'field', rows: 2, 'aria-label': t.edit.original, placeholder: t.edit.original });
+  const newField: HTMLTextAreaElement = h('textarea', { class: 'field', rows: 2, 'aria-label': t.edit.newText, placeholder: t.edit.newText });
+  const editPanel = h('section', { class: 'sheet', hidden: true },
+    h('p', { class: 'muted' }, t.edit.hint),
+    h('button', { class: 'btn secondary', onclick: () => detectLines() }, t.edit.detect),
+    origField, newField,
+    h('div', { class: 'row' },
+      h('button', { class: 'btn primary', onclick: () => replaceLine(false) }, t.edit.replace),
+      h('button', { class: 'btn ghost', onclick: () => replaceLine(true) }, t.edit.removeOnly)));
+
+  async function detectLines() {
+    if (job) return;
+    overlay.hidden = false; setOverlay(t.edit.detecting);
+    try {
+      detected = (await detectText(p!.rgba, W, H)).lines; pick = -1; schedule();
+      if (!detected.length) toast(t.edit.none); else toast(t.edit.pick);
+    } catch (err) { toast((err as { code?: string }).code === 'model_missing' ? t.edit.detMissing : t.obj.failed, 'error'); }
+    finally { overlay.hidden = true; setOverlay(t.editor.working); }
+  }
+
+  async function pickLine(i: number) {
+    pick = i; schedule();
+    const r = detected[i];
+    overlay.hidden = false; setOverlay(t.font.reading);
+    try {
+      const c = cropSel(p!.rgba, W, { x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 });
+      const text = (await readText(c.crop, c.w, c.h)).trim();
+      origField.value = text; newField.value = text;
+      if (!text) toast(t.font.ocrEmpty);
+    } catch (err) { toast((err as { code?: string }).code === 'model_missing' ? t.font.ocrMissing : t.font.ocrEmpty, 'error'); }
+    finally { overlay.hidden = true; setOverlay(t.editor.working); }
+  }
+
+  async function replaceLine(removeOnly: boolean) {
+    if (job) return;
+    if (pick < 0) { toast(t.edit.pick); return; }
+    const r = detected[pick], orig = origField.value.trim(), next = newField.value.trim();
+    if (!removeOnly && !next) { toast(t.edit.needText); return; }
+    // 1) read the style from the untouched photo (before the old text is erased)
+    const area: Sel = { x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 };
+    const crop0 = cropSel(p!.rgba, W, area);
+    const color = inkColor(crop0.crop, inkMask(toGray(crop0.crop, crop0.w * crop0.h)));
+    const sample = orig || next;
+    let font = fontsFor(next || orig)[0], px = (r.y1 - r.y0) * 0.9;
+    if (!removeOnly) {
+      overlay.hidden = false; setOverlay(t.edit.working);
+      const ranked = await findFonts(p!.rgba, W, area, sample).catch(() => []);
+      if (ranked.length && scriptOf(next) === scriptOf(sample)) font = ranked[0].font;
+      await loadFont(font);
+      if (orig && scriptOf(next) === scriptOf(orig)) {
+        const m = document.createElement('canvas').getContext('2d')!; m.font = fontCss(font, 100);
+        const natural = m.measureText(orig).width;
+        if (natural > 0) px = Math.max((r.y1 - r.y0) * 0.6, Math.min((r.y1 - r.y0) * 1.6, ((r.x1 - r.x0) / natural) * 100));
+      }
+    }
+    // 2) erase the old line with the model
+    const rr = padRect(r, Math.max(3, Math.round(0.12 * (r.y1 - r.y0))), W, H);
+    const ok = await eraseRegion((fw, fh) => {
+      const hole = new Uint8Array(fw * fh), kx = fw / W, ky = fh / H, x0 = Math.floor(rr.x0 * kx), x1 = Math.min(fw, Math.ceil(rr.x1 * kx));
+      for (let y = Math.floor(rr.y0 * ky); y < Math.min(fh, Math.ceil(rr.y1 * ky)); y++) hole.fill(1, y * fw + x0, y * fw + x1);
+      return hole;
+    });
+    if (!ok) return;
+    // 3) put the new text in the same place
+    if (removeOnly) { detected.splice(pick, 1); pick = -1; schedule(); toast(t.edit.done); return; }
+    const layer = { id: crypto.randomUUID(), text: next, font, size: px / W, color, cx: (r.x0 + r.x1) / 2 / W, cy: (r.y0 + r.y1) / 2 / H };
+    p!.texts.push(layer); selected = layer.id; detected = []; pick = -1;
+    showTool('text'); toast(t.edit.done);
+  }
+
+  // --- crop (any shape) + resize
+  const cropPanel = h('section', { class: 'sheet', hidden: true });
+  const wIn: HTMLInputElement = h('input', { id: 'w-in', type: 'number', class: 'field', min: 1, inputmode: 'numeric', 'aria-label': t.crop.width, oninput: () => syncDim('w') });
+  const hIn: HTMLInputElement = h('input', { id: 'h-in', type: 'number', class: 'field', min: 1, inputmode: 'numeric', 'aria-label': t.crop.height, oninput: () => syncDim('h') });
+  const lockBox: HTMLInputElement = h('input', { type: 'checkbox', id: 'lock-ratio', checked: true });
+  function syncDim(which: 'w' | 'h') {
+    if (!lockBox.checked) return;
+    const bw = p!.bitmap.width, bh = p!.bitmap.height;
+    if (which === 'w') hIn.value = String(Math.max(1, Math.round((Number(wIn.value) * bh) / bw)));
+    else wIn.value = String(Math.max(1, Math.round((Number(hIn.value) * bw) / bh)));
+  }
+  function setCropShape(sh: Shape) {
+    cropShape = sh; freePts = [];
+    if (sh === 'circle' || sh === 'heart' || sh === 'star' || sh === 'hexagon') setRatio(1, false);
+    renderCrop(); schedule();
+  }
+  function setRatio(r: number | null, redraw = true) {
+    cropAspect = r;
+    if (r) crop = aspectBox(r, W, H);
+    if (redraw) { renderCrop(); schedule(); }
+  }
+  function renderCrop() {
+    const ratio = (label: string, r: number | null) => chip(label, cropAspect === r, () => setRatio(r));
+    const shapeRow = h('div', { class: 'row fontrow' }, ...SHAPES.map((sh) => chip(t.crop.shapes[sh], cropShape === sh, () => setCropShape(sh))));
+    wIn.value = String(p!.bitmap.width); hIn.value = String(p!.bitmap.height);
+    setChildren(cropPanel,
+      h('h2', {}, t.crop.cropTitle), shapeRow,
+      cropShape === 'round' ? slider(t.crop.round, 0, 100, Math.round(cropRound * 100), (v) => { cropRound = v / 100; schedule(); }) : null,
+      cropShape === 'free' ? h('p', { class: 'muted' }, t.crop.free)
+        : h('div', { class: 'row' }, ratio(t.crop.ratios.free, null), ratio(t.crop.ratios.square, 1), ratio(t.crop.ratios.r43, 4 / 3), ratio(t.crop.ratios.r169, 16 / 9), ratio(t.crop.ratios.r916, 9 / 16)),
+      h('button', { class: 'btn primary', onclick: () => applyCrop() }, t.crop.apply),
+      h('h2', {}, t.crop.resizeTitle),
+      h('p', { class: 'muted' }, `${t.crop.sizeNow}: ${p!.bitmap.width} × ${p!.bitmap.height} ${t.crop.px}`),
+      h('div', { class: 'row' }, h('label', { for: 'w-in' }, t.crop.width), wIn),
+      h('div', { class: 'row' }, h('label', { for: 'h-in' }, t.crop.height), hIn),
+      h('div', { class: 'row' }, lockBox, h('label', { for: 'lock-ratio' }, t.crop.lock)),
+      h('button', { class: 'btn secondary', onclick: () => applyResize() }, t.crop.applyResize),
+      p!.prev ? h('button', { class: 'btn ghost', onclick: () => { if (undoGeometry(p!)) { projects.touch(p!); reload(); } } }, t.crop.undo) : null);
+  }
+  async function geometry(work: () => Promise<void>, done: string) {
+    if (job) return;
+    overlay.hidden = false; setOverlay(t.editor.working);
+    try { await work(); reload(); toast(done); }
+    catch { toast(t.crop.failed, 'error'); overlay.hidden = true; }
+  }
+  async function applyCrop() {
+    if (cropShape === 'free' && !polyBBox(freePts)) { toast(t.crop.needShape); return; }
+    await geometry(() => cropProject(p!, crop, cropShape, cropRound, freePts), t.crop.done);
+  }
+  async function applyResize() {
+    const nw = Math.round(Number(wIn.value)), nh = Math.round(Number(hIn.value));
+    if (!(nw > 0 && nh > 0)) { toast(t.crop.failed, 'error'); return; }
+    const s = Math.min(1, 4096 / Math.max(nw, nh));
+    await geometry(() => resizeProject(p!, Math.max(1, Math.round(nw * s)), Math.max(1, Math.round(nh * s))), t.crop.resized);
+  }
+  function cropDown(pt: { x: number; y: number; k: number }, e: PointerEvent) {
+    canvas.setPointerCapture(e.pointerId);
+    if (cropShape === 'free') { freePts = [{ x: pt.x, y: pt.y }]; cropDrag = { kind: 'free', sx: pt.x, sy: pt.y, start: crop }; schedule(); return; }
+    const corner = nearestCorner(crop, pt.x, pt.y, Math.max(32 * pt.k, W / 14));
+    if (corner) cropDrag = { kind: 'corner', corner, sx: pt.x, sy: pt.y, start: crop };
+    else if (pt.x >= crop.x0 && pt.x <= crop.x1 && pt.y >= crop.y0 && pt.y <= crop.y1) cropDrag = { kind: 'move', sx: pt.x, sy: pt.y, start: crop };
+  }
+  function cropMove(pt: { x: number; y: number; k: number }) {
+    const d = cropDrag!;
+    if (d.kind === 'free') { const l = freePts[freePts.length - 1]; if (Math.hypot(pt.x - l.x, pt.y - l.y) > 4 * pt.k) freePts.push({ x: pt.x, y: pt.y }); }
+    else if (d.kind === 'corner') crop = dragCorner(d.start, d.corner!, pt.x, pt.y, cropAspect, W, H);
+    else crop = moveRect(d.start, pt.x - d.sx, pt.y - d.sy, W, H);
+    schedule();
+  }
+  function cropUp() {
+    if (!cropDrag) return;
+    if (cropDrag.kind === 'free') { const bb = polyBBox(freePts); if (bb) crop = clampRect(bb, W, H); else freePts = []; }
+    cropDrag = null; schedule();
+  }
+
+  // --- font finder (S19): select the text area, type what it says, compare with the bundled fonts
+  const fontText: HTMLTextAreaElement = h('textarea', { class: 'field', rows: 2, 'aria-label': t.font.input, placeholder: t.font.input });
+  const fontResults = h('div', { class: 'results' });
+  const fontPanel = h('section', { class: 'sheet', hidden: true },
+    h('p', { class: 'muted' }, t.font.hint),
+    h('button', { class: 'btn secondary', onclick: () => autoRead() }, t.font.read), fontText,
+    h('button', { class: 'btn primary', onclick: () => searchFont() }, t.font.search), fontResults);
+  async function autoRead() {
+    if (!sel || Math.abs(sel.x1 - sel.x0) < 8 || Math.abs(sel.y1 - sel.y0) < 8) { toast(t.font.none); return; }
+    overlay.hidden = false; (overlay.firstChild as HTMLElement).textContent = t.font.reading;
+    try {
+      const c = cropSel(p!.rgba, W, sel);
+      const text = (await readText(c.crop, c.w, c.h)).trim();
+      if (!text) { toast(t.font.ocrEmpty); return; }
+      fontText.value = text; await searchFont();
+    } catch (err) {
+      toast((err as { code?: string }).code === 'model_missing' ? t.font.ocrMissing : t.font.ocrEmpty, 'error');
+    } finally { overlay.hidden = true; (overlay.firstChild as HTMLElement).textContent = t.editor.working; }
+  }
+  async function searchFont() {
+    const text = fontText.value.trim();
+    if (!sel || Math.abs(sel.x1 - sel.x0) < 8 || Math.abs(sel.y1 - sel.y0) < 8) { toast(t.font.none); return; }
+    if (!text) { toast(t.font.needText); return; }
+    const ranked = await findFonts(p!.rgba, W, sel, text).catch(() => []);
+    if (!ranked.length) { toast(t.font.fail, 'error'); return; }
+    fontResults.replaceChildren(h('h2', {}, t.font.results), ...ranked.slice(0, 5).map((r) => {
+      const b = h('button', { class: 'btn secondary result', 'aria-label': `${t.font.apply} ${r.font}`, onclick: () => useFont(r.font, text) }, `${r.font}  ·  ${Math.round(r.score * 100)}%`);
+      b.style.fontFamily = `"${r.font}", sans-serif`; return b;
+    }), h('p', { class: 'muted' }, t.font.note));
+  }
+  function useFont(font: string, text: string) {
+    const l = { id: crypto.randomUUID(), text, font, size: 0.09, color: '#ffffff', cx: 0.5, cy: 0.5 };
+    p!.texts.push(l); selected = l.id; showTool('text');
+  }
+
+  // --- remove background (worker)
+  const overlay = h('div', { class: 'overlay', hidden: true, role: 'status' }, h('p', {}, t.editor.working),
     h('button', { class: 'btn secondary', onclick: () => job?.cancel() }, t.editor.cancel));
   const runBtn = h('button', { class: 'btn primary', onclick: () => runRemoveBg() }, t.editor.runRemoveBg);
-
   async function runRemoveBg() {
     if (job) return;
     overlay.hidden = false; runBtn.disabled = true;
-    const j = segment(p!.rgba, W, H, () => {});
-    job = j;
+    const j = segment(p!.rgba, W, H, () => {}); job = j;
     try {
-      const mask = await j.promise;
-      p!.mask = mask; undo = []; redo = []; syncHistory();
-      brushPanel.hidden = false; runBtn.textContent = t.editor.removeBg;
-      projects.touch(p!); schedule();
-      toast(t.editor.cutoutDone);
+      p!.mask = await j.promise; undo = []; redo = []; syncHistory();
+      runBtn.textContent = t.editor.removeBg; projects.touch(p!); showTool('cut'); toast(t.editor.cutoutDone);
     } catch (err) {
       const code = err instanceof SegmentError ? err.code : 'failed';
-      if (code === 'model_missing') toast(t.editor.modelMissing, 'error');
-      else if (code !== 'cancelled') toast(t.editor.failed, 'error');
-    } finally {
-      job = null; overlay.hidden = true; runBtn.disabled = false;
-    }
+      if (code === 'model_missing') toast(t.editor.modelMissing, 'error'); else if (code !== 'cancelled') toast(t.editor.failed, 'error');
+    } finally { job = null; overlay.hidden = true; runBtn.disabled = false; }
   }
 
-  // --- export sheet (S16)
-  let format: Format = 'png';
-  let quality = 0.92;
-  let lastBlob: Blob | null = null;
-  let lastName = '';
-  const exportSheet = h('section', { class: 'sheet export', hidden: true, 'aria-label': t.export.title });
-  function openExport() {
-    if (!p!.mask) { toast(t.editor.needCutout); return; }
-    exportSheet.hidden = false;
-    renderExportSheet();
-  }
+  // --- export (S16)
+  let format: Format = formatOfMime(p.mime), quality = 0.92, lastBlob: Blob | null = null, lastName = '';
+  const exportSheet = h('section', { class: 'sheet export', hidden: true });
+  function openExport() { exportSheet.hidden = false; renderExportSheet(); }
   function renderExportSheet(state: 'idle' | 'busy' = 'idle', saved?: string, canShare = false) {
-    const fmt = (f: Format, label: string): HTMLButtonElement =>
-      h('button', { class: 'chip', 'aria-pressed': String(format === f), onclick: () => { format = f; renderExportSheet(); } }, label);
-    const q = h('div', { class: 'row', hidden: format !== 'jpg' },
-      h('label', { for: 'q' }, t.export.quality),
-      h('input', { id: 'q', type: 'range', min: 50, max: 100, value: Math.round(quality * 100),
-        oninput: (e: Event) => { quality = Number((e.target as HTMLInputElement).value) / 100; } }));
-    // conditional children may be null; setChildren skips them.
-    const parts: (Node | null)[] = [
-      h('h2', {}, t.export.title),
-      h('div', { class: 'row' }, fmt('png', t.export.png), fmt('jpg', t.export.jpg)),
-      h('p', { class: 'muted' }, format === 'png' ? t.export.pngNote : t.export.jpgNote),
-      q,
+    setChildren(exportSheet, h('h2', {}, t.export.title),
+      h('div', { class: 'row' }, chip(t.export.png, format === 'png', () => { format = 'png'; renderExportSheet(); }), chip(t.export.jpg, format === 'jpg', () => { format = 'jpg'; renderExportSheet(); }), chip(t.export.webp, format === 'webp', () => { format = 'webp'; renderExportSheet(); })),
+      h('p', { class: 'muted' }, `${format === 'png' ? t.export.pngNote : format === 'jpg' ? t.export.jpgNote : t.export.webpNote} ${format === formatOfMime(p!.mime) ? t.export.sameAsOriginal : ''}`),
+      format !== 'png' ? slider(t.export.quality, 50, 100, Math.round(quality * 100), (v) => { quality = v / 100; }) : null,
       state === 'busy' ? h('p', { 'aria-live': 'polite' }, t.export.rendering) : null,
       saved ? h('p', { class: 'ok', role: 'status' }, saved) : null,
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', disabled: state === 'busy', onclick: doSave }, t.export.save),
         canShare ? h('button', { class: 'btn secondary', onclick: () => shareBlob(lastBlob!, lastName).catch(() => toast(t.export.saveFailed, 'error')) }, t.export.share) : null,
-        h('button', { class: 'btn ghost', onclick: () => { exportSheet.hidden = true; } }, t.editor.cancel)),
-    ];
-    setChildren(exportSheet, ...parts);
+        h('button', { class: 'btn ghost', onclick: () => { exportSheet.hidden = true; } }, t.editor.cancel)));
   }
-  function savedMessage(s: Saved, name: string): string {
-    if (s.where === 'gallery') return t.export.savedGallery;
-    if (s.where === 'documents') return `${t.export.savedDocuments}Documents/PhotoEditor/${name}`;
-    if (s.where === 'cache') return t.export.savedCache;
-    return t.export.savedWeb;
-  }
+  const savedMessage = (s: Saved, name: string) =>
+    s.where === 'gallery' ? t.export.savedGallery : s.where === 'documents' ? `${t.export.savedDocuments}Documents/PhotoEditor/${name}` : s.where === 'cache' ? t.export.savedCache : t.export.savedWeb;
   async function doSave() {
     renderExportSheet('busy');
     try {
-      const blob = await renderExport(p!.bitmap, p!.mask!, W, H, format, quality);
+      const blob = await renderExport(p!, format, quality);
       const name = `${p!.title}-${Date.now()}.${format}`;
       const saved = await saveFile(blob, name);
       lastBlob = blob; lastName = name;
       renderExportSheet('idle', savedMessage(saved, name), saved.where !== 'download');
-    } catch {
-      renderExportSheet();
-      toast(t.export.saveFailed, 'error');
-    }
+    } catch { renderExportSheet(); toast(t.export.saveFailed, 'error'); }
   }
 
-  // --- tool strip (only background removal is built in this slice)
-  const tool = (label: string, active = false) =>
-    h('button', { class: 'tool', 'aria-pressed': String(active), onclick: active ? undefined : () => toast(t.editor.soon) }, label);
+  // --- tools
+  function showTool(next: Tool) {
+    if (next === 'bg' && !p!.mask) { toast(t.editor.needCutout); return; }
+    tool = next; exportSheet.hidden = true;
+    cutPanel.hidden = !(next === 'cut' && p!.mask);
+    bgPanel.hidden = next !== 'bg'; textPanel.hidden = next !== 'text'; objPanel.hidden = next !== 'obj'; fontPanel.hidden = next !== 'font';
+    editPanel.hidden = next !== 'edit'; cropPanel.hidden = next !== 'crop'; if (next !== 'edit') { pick = -1; }
+    if (next === 'bg') renderBg(); if (next === 'text') renderText(); if (next === 'crop') renderCrop();
+    strip.forEach(([b, k]) => b.setAttribute('aria-pressed', String(k === next))); schedule();
+  }
+  const mk = (label: string, k: Tool | null): [HTMLButtonElement, Tool | null] =>
+    [h('button', { class: 'tool', 'aria-pressed': String(k === 'cut'), onclick: () => (k ? showTool(k) : toast(t.editor.soon)) }, label), k];
+  const strip = [mk(t.tools.removeBg, 'cut'), mk(t.tools.background, 'bg'), mk(t.tools.text, 'text'), mk(t.tools.editText, 'edit'), mk(t.tools.removeObject, 'obj'), mk(t.tools.fonts, 'font'), mk(t.tools.crop, 'crop')];
 
   const el = h('main', { class: 'editor' },
     h('header', { class: 'topbar' },
       h('button', { class: 'icon-btn', 'aria-label': t.editor.back, onclick: () => go('/') }, '→'),
-      h('div', { class: 'spacer' }), undoBtn, redoBtn, exportBtn),
+      h('div', { class: 'spacer' }), undoBtn, redoBtn, h('button', { class: 'btn primary small', onclick: openExport }, t.editor.export)),
     h('div', { class: 'stage checker' }, canvas, overlay),
     h('div', { class: 'actions' }, runBtn),
-    brushPanel, exportSheet,
-    h('nav', { class: 'toolstrip', 'aria-label': 'tools' },
-      tool(t.tools.removeBg, true), tool(t.tools.background), tool(t.tools.removeObject),
-      tool(t.tools.text), tool(t.tools.fonts), tool(t.tools.crop)));
+    cutPanel, bgPanel, textPanel, editPanel, objPanel, fontPanel, cropPanel, exportSheet,
+    h('nav', { class: 'toolstrip', 'aria-label': 'tools' }, ...strip.map(([b]) => b)));
 
   draw();
   return { el, dispose: () => { job?.cancel(); if (raf) cancelAnimationFrame(raf); } };

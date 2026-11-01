@@ -5,6 +5,8 @@ const routes = new Map<string, Factory>();
 let current: Screen | null = null;
 
 export function route(path: string, f: Factory): void { routes.set(path, f); }
+/** Rebuilds the current screen (used after the photo's size changed). */
+export function reload(): void { window.dispatchEvent(new HashChangeEvent('hashchange')); }
 export function go(path: string): void { location.hash = '#' + path; }
 
 export function start(root: HTMLElement, fallback: Factory): void {
