@@ -86,7 +86,10 @@ export function editorScreen(): Screen {
     const hs = Math.max(14, W / 40); ctx.fillStyle = '#5b8def';
     for (const [x, y] of [[c.x0, c.y0], [c.x1, c.y0], [c.x0, c.y1], [c.x1, c.y1]]) ctx.fillRect(x - hs / 2, y - hs / 2, hs, hs);
   }
-  const schedule = () => { if (!raf) raf = requestAnimationFrame(draw); };
+  const schedule = () => {
+    projects.touch(p!);
+    if (!raf) raf = requestAnimationFrame(draw);
+  };
 
   // top bar
   const undoBtn = h('button', { class: 'icon-btn', 'aria-label': t.editor.undo, disabled: true, onclick: () => step(undo, redo) }, '↶');
@@ -396,7 +399,7 @@ export function editorScreen(): Screen {
   async function geometry(work: () => Promise<void>, done: string) {
     if (job) return;
     overlay.hidden = false; setOverlay(t.editor.working);
-    try { await work(); reload(); toast(done); }
+    try { await work(); projects.touch(p!); reload(); toast(done); }
     catch { toast(t.crop.failed, 'error'); overlay.hidden = true; }
   }
   async function applyCrop() {

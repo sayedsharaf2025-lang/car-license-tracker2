@@ -5,6 +5,7 @@ import { route, start } from './router.ts';
 import { homeScreen } from './screens/home.ts';
 import { editorScreen } from './screens/editor.ts';
 import { stubScreen } from './screens/stub.ts';
+import { projects } from './data/store.ts';
 
 route('/', homeScreen);
 route('/editor', editorScreen);
@@ -17,4 +18,5 @@ const stubs: Record<string, string> = {
 };
 for (const [id, name] of Object.entries(stubs)) route(`/s/${id}`, () => stubScreen(name));
 
-start(document.getElementById('app')!, () => homeScreen());
+// Load local projects before rendering the recent-projects list.
+void projects.restore().finally(() => start(document.getElementById('app')!, () => homeScreen()));
