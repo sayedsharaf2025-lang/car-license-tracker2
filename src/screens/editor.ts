@@ -201,7 +201,7 @@ export function editorScreen(): Screen {
         const value = Math.max(minSize, Math.min(maxSize, l.size * 100));
         const range = h('input', { class: 'text-size-range', type: 'range', min: minSize, max: maxSize, step: 0.01, value, 'aria-label': 'حجم النص بالنسبة لعرض الصورة' });
         const numeric = h('input', { class: 'text-size-number', type: 'number', min: minSize, max: maxSize, step: 0.01, value: Number(value.toFixed(2)), inputmode: 'decimal', 'aria-label': 'حجم النص كنسبة مئوية' });
-        const update = (raw: string, source: HTMLInputElement) => {
+        const update = (raw: string) => {
           if (raw.trim() === '') return;
           const n = Number(raw);
           if (!Number.isFinite(n)) return;
@@ -212,10 +212,10 @@ export function editorScreen(): Screen {
         };
         range.addEventListener('pointerdown', () => captureHistory());
         numeric.addEventListener('focus', () => captureHistory());
-        range.addEventListener('input', () => update(range.value, range));
-        numeric.addEventListener('change', () => update(numeric.value, numeric));
-        const smaller = h('button', { class: 'chip', type: 'button', 'aria-label': 'تصغير النص', onclick: () => { captureHistory(); update(String(Math.max(minSize, value - Math.max(0.01, value * 0.1))), numeric); } }, '−');
-        const larger = h('button', { class: 'chip', type: 'button', 'aria-label': 'تكبير النص', onclick: () => { captureHistory(); update(String(Math.min(maxSize, value + Math.max(0.01, value * 0.1))), numeric); } }, '+');
+        range.addEventListener('input', () => update(range.value));
+        numeric.addEventListener('change', () => update(numeric.value));
+        const smaller = h('button', { class: 'chip', type: 'button', 'aria-label': 'تصغير النص', onclick: () => { captureHistory(); update(String(Math.max(minSize, l.size * 100 - Math.max(0.01, l.size * 10)))); } }, '−');
+        const larger = h('button', { class: 'chip', type: 'button', 'aria-label': 'تكبير النص', onclick: () => { captureHistory(); update(String(Math.min(maxSize, l.size * 100 + Math.max(0.01, l.size * 10)))); } }, '+');
         return h('div', { class: 'text-size-control' },
           h('div', { class: 'text-size-heading' }, h('label', {}, 'حجم النص'), h('span', { class: 'muted' }, '0.01% إلى 200% من عرض الصورة')),
           range,
