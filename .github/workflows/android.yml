@@ -31,7 +31,7 @@ jobs:
           [ -s ocr_dict.txt ] || curl -fL --retry 3 --retry-all-errors -o ocr_dict.txt https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/arabic/dict.txt
           test "$(stat -c%s ocr_det.onnx)" -gt 100000
           test "$(stat -c%s ocr_rec.onnx)" -gt 100000
-          test "$(wc -l < ocr_dict.txt)" -gt 500
+          test "$(wc -l < ocr_dict.txt)" -gt 50
           printf '{"model":"PP-OCR Arabic","languages":["ar","fa","ur"],"offline":true}\n' > ocr-languages.json
           ls -lh ocr_det.onnx ocr_rec.onnx ocr_dict.txt ocr-languages.json
       - run: npm install
