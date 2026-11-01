@@ -2,7 +2,7 @@ import { h, setChildren, toast } from '../ui.ts';
 import { t } from '../copy.ts';
 import { go, reload, type Screen } from '../router.ts';
 import { projects } from '../data/store.ts';
-import { compositeCutout, paintBrush, resizeMaskBilinear, type BrushMode } from '../lib/maskMath.ts';
+import { compositeCutout, paintBrush, resizeMaskBilinear, thresholdMask, type BrushMode } from '../lib/maskMath.ts';
 import { inpaint } from '../lib/inpaint.ts';
 import { fillHoles, prepareMigan, miganStatus, MiganError, type MiganStage } from '../lib/migan.ts';
 import { findFonts, cropSel, type Sel } from '../lib/fontFinder.ts';
@@ -42,6 +42,7 @@ export function editorScreen(): Screen {
   const objMask = new Uint8Array(W * H);
   let sel: Sel | null = null;
   let objMode: 'paint' | 'rub' = 'paint';
+  let objectThreshold = 128;
   let detected: Rect[] = [], pick = -1;
   let crop: CRect = { x0: 0, y0: 0, x1: W, y1: H };
   let cropShape: Shape = 'rect', cropRound = 0.25, cropAspect: number | null = null;
@@ -63,7 +64,7 @@ export function editorScreen(): Screen {
     cutCtx.putImageData(frame, 0, 0);
     boxes = drawScene(ctx, W, H, showOriginal ? { kind: 'transparent' } : p!.bg, cutCanvas, showOriginal ? [] : p!.texts);
     if (tool === 'obj') {
-      for (let i = 0; i < objMask.length; i++) { const a = objMask[i] > 127 ? 150 : 0; ovFrame.data[i * 4] = 255; ovFrame.data[i * 4 + 1] = 60; ovFrame.data[i * 4 + 2] = 60; ovFrame.data[i * 4 + 3] = a; }
+      for (let i = 0; i < objMask.length; i++) { const a = objMask[i] >= objectThreshold ? 150 : 0; ovFrame.data[i * 4] = 255; ovFrame.data[i * 4 + 1] = 60; ovFrame.data[i * 4 + 2] = 60; ovFrame.data[i * 4 + 3] = a; }
       ovCanvas.getContext('2d')!.putImageData(ovFrame, 0, 0); ctx.drawImage(ovCanvas, 0, 0);
     }
     if (tool === 'edit') detected.forEach((r, i) => { ctx.strokeStyle = i === pick ? '#ffd23d' : '#3ddc97'; ctx.lineWidth = Math.max(i === pick ? 4 : 2, W / 400); ctx.strokeRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0); });
@@ -430,9 +431,12 @@ export function editorScreen(): Screen {
   void miganStatus().then((st) => { if (st === 'download') { objHint.textContent = t.obj.hintDownload; prefetch.hidden = false; } });
   const objPanel = h('section', { class: 'sheet', hidden: true },
     objHint, prefetch,
+    h('button', { class: 'btn secondary', onclick: () => autoSelectMainObject() }, 'تحديد العنصر الرئيسي تلقائيًا'),
+    h('p', { class: 'muted' }, 'بعد التحديد التلقائي يمكنك إضافة أو مسح أجزاء بالفرشاة، ثم إزالة العنصر.'),
     h('div', { class: 'row' }, objPaint, objRub),
     slider(t.editor.size, 6, 90, radiusPx, (v) => { radiusPx = v; }),
     slider(t.editor.hardness, 0, 100, Math.round(hardness * 100), (v) => { hardness = v / 100; }),
+    slider('دقة حدود التحديد', 40, 220, objectThreshold, (v) => { objectThreshold = v; schedule(); }),
     h('div', { class: 'row' },
       h('button', { class: 'btn primary', onclick: () => removeObject() }, t.obj.run),
       h('button', { class: 'btn ghost', onclick: () => { objMask.fill(0); schedule(); } }, t.obj.clear)),
@@ -477,13 +481,34 @@ export function editorScreen(): Screen {
   }
 
   async function removeObject() {
-    if (job || !objMask.some((v) => v > 127)) { toast(t.obj.empty); return; }
+    if (job || !objMask.some((v) => v >= objectThreshold)) { toast(t.obj.empty); return; }
     const ok = await eraseRegion((fw, fh) => {
-      const big = resizeMaskBilinear(objMask, W, H, fw, fh), hole = new Uint8Array(fw * fh);
-      for (let i = 0; i < hole.length; i++) hole[i] = big[i] > 40 ? 1 : 0;
+      const big = resizeMaskBilinear(objMask, W, H, fw, fh);
+      const selected = thresholdMask(big, objectThreshold), hole = new Uint8Array(fw * fh);
+      for (let i = 0; i < hole.length; i++) hole[i] = selected[i] ? 1 : 0;
       return hole;
     });
     if (ok) { objMask.fill(0); schedule(); }
+  }
+
+  /** Uses the bundled foreground model to propose a subject mask; the user can refine it with the brush before removal. */
+  async function autoSelectMainObject() {
+    if (job) return;
+    overlay.hidden = false; setOverlay('جاري تحميل نموذج التحديد...');
+    const j = segment(p!.rgba, W, H, (stage) => setOverlay(stage === 'model' ? 'تحميل نموذج التحديد...' : 'جاري تحليل الصورة...'));
+    job = j;
+    try {
+      const mask = await j.promise;
+      objMask.set(mask);
+      schedule();
+      toast('تم تحديد العنصر الرئيسي. راجع التحديد وعدّله بالفرشاة قبل الإزالة.');
+    } catch (err) {
+      if (!(err instanceof SegmentError && err.code === 'cancelled')) {
+        toast(err instanceof SegmentError && err.code === 'model_missing'
+          ? 'نموذج التحديد غير موجود في هذه النسخة.'
+          : 'تعذر تحديد العنصر تلقائيًا.', 'error');
+      }
+    } finally { job = null; overlay.hidden = true; setOverlay(t.editor.working); }
   }
 
   async function autoSelectText() {
