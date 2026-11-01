@@ -112,7 +112,7 @@ export function editorScreen(): Screen {
     p!.mask = snap.mask?.slice() ?? null;
     p!.texts = structuredClone(snap.texts); p!.bg = snap.bg;
     if (snap.rgba) p!.rgba = snap.rgba.slice();
-    if (snap.bitmapPixels && snap.bitmapW && snap.bitmapH) { const c = document.createElement('canvas'); c.width = snap.bitmapW; c.height = snap.bitmapH; c.getContext('2d')!.putImageData(new ImageData(snap.bitmapPixels, snap.bitmapW, snap.bitmapH), 0, 0); void createImageBitmap(c).then((b) => { p!.bitmap = b; projects.touch(p!); }); }
+    if (snap.bitmapPixels && snap.bitmapW && snap.bitmapH) { const c = document.createElement('canvas'); c.width = snap.bitmapW; c.height = snap.bitmapH; const pixels = new Uint8ClampedArray(new ArrayBuffer(snap.bitmapPixels.length)); pixels.set(snap.bitmapPixels); c.getContext('2d')!.putImageData(new ImageData(pixels, snap.bitmapW, snap.bitmapH), 0, 0); void createImageBitmap(c).then((b) => { p!.bitmap = b; projects.touch(p!); }); }
     syncHistory(); renderText(); renderBg(); schedule(); projects.touch(p!);
   }
 
