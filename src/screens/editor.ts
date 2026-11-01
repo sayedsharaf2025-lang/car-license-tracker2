@@ -194,7 +194,7 @@ export function editorScreen(): Screen {
   let choosingCloneSource = true, cloneOpacity = 0.85, cloneHardness = 0.75;
   let cloneCanvas: HTMLCanvasElement | null = null, cloneCtx: CanvasRenderingContext2D | null = null;
   let cloneSample: HTMLCanvasElement | null = null, cloneSampleCtx: CanvasRenderingContext2D | null = null;
-  let cloneOffset: { x: number; y: number } | null = null;
+  let cloneOffset: { x: number; y: number } | null = null;\n  let cloneStampCanvas: HTMLCanvasElement | null = null, cloneStampCtx: CanvasRenderingContext2D | null = null;
   const cloneSourceBtn = h('button', { class: 'btn primary', onclick: () => { choosingCloneSource = true; cloneSourceBtn.textContent = 'حدد المصدر على الصورة'; toast('اضغط على منطقة نظيفة لتحديد المصدر'); } }, 'حدد المصدر على الصورة');
   const cloneClearBtn = h('button', { class: 'btn ghost', onclick: () => { cloneSource = null; choosingCloneSource = true; cloneSourceBtn.textContent = 'حدد المصدر على الصورة'; toast('تم مسح المصدر'); } }, 'مسح المصدر');
   const clonePanel = h('section', { class: 'sheet', hidden: true },
@@ -215,7 +215,7 @@ export function editorScreen(): Screen {
     cloneCtx = cloneCanvas.getContext('2d')!; cloneCtx.drawImage(p!.bitmap, 0, 0);
     cloneSample = document.createElement('canvas'); cloneSample.width = bw; cloneSample.height = bh;
     cloneSampleCtx = cloneSample.getContext('2d')!; cloneSampleCtx.drawImage(p!.bitmap, 0, 0);
-    cloneOffset = { x: (cloneSource.x - pt.x) * sx, y: (cloneSource.y - pt.y) * sy };
+    cloneOffset = { x: (cloneSource.x - pt.x) * sx, y: (cloneSource.y - pt.y) * sy };\n    cloneStampCanvas = document.createElement('canvas'); cloneStampCanvas.width = Math.max(2, Math.ceil(radiusPx * (sx + sy))); cloneStampCanvas.height = cloneStampCanvas.width; cloneStampCtx = cloneStampCanvas.getContext('2d')!;
     paintClone(pt.x, pt.y);
     return true;
   }
@@ -224,24 +224,23 @@ export function editorScreen(): Screen {
     const sx = p!.bitmap.width / W, sy = p!.bitmap.height / H;
     const cx = x * sx, cy = y * sy, r = radiusPx * (sx + sy) / 2;
     const dx = cloneOffset.x, dy = cloneOffset.y;
-    cloneCtx.save(); cloneCtx.beginPath(); cloneCtx.arc(cx, cy, r, 0, Math.PI * 2); cloneCtx.clip();
-    cloneCtx.globalAlpha = cloneOpacity;
-    if (cloneHardness < 0.98) {
-      const feather = r * (1 - cloneHardness);
-      cloneCtx.globalCompositeOperation = 'destination-out';
-      const grad = cloneCtx.createRadialGradient(cx, cy, Math.max(0, r - feather), cx, cy, r);
-      grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(0,0,0,1)');
-      cloneCtx.fillStyle = grad; cloneCtx.beginPath(); cloneCtx.arc(cx, cy, r, 0, Math.PI * 2); cloneCtx.fill();
-      cloneCtx.globalCompositeOperation = 'source-over';
-    }
-    cloneCtx.drawImage(cloneSample, cx - r + dx, cy - r + dy, 2 * r, 2 * r, cx - r, cy - r, 2 * r, 2 * r);
-    cloneCtx.restore();
+    if (!cloneStampCanvas || !cloneStampCtx) return;
+    const size = cloneStampCanvas.width;
+    cloneStampCtx.clearRect(0, 0, size, size);
+    cloneStampCtx.drawImage(cloneSample, cx - r + dx, cy - r + dy, 2 * r, 2 * r, 0, 0, size, size);
+    cloneStampCtx.globalCompositeOperation = 'destination-in';
+    const inner = r * cloneHardness, grad = cloneStampCtx.createRadialGradient(size/2, size/2, inner, size/2, size/2, size/2);
+    grad.addColorStop(0, 'rgba(0,0,0,1)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    cloneStampCtx.fillStyle = grad; cloneStampCtx.fillRect(0, 0, size, size);
+    cloneStampCtx.globalCompositeOperation = 'source-over';
+    cloneCtx.save(); cloneCtx.globalAlpha = cloneOpacity;
+    cloneCtx.drawImage(cloneStampCanvas, cx-r, cy-r, 2*r, 2*r); cloneCtx.restore();
   }
   async function finishCloneStroke() {
     if (!cloneCanvas || !cloneCtx) return;
     try { p!.bitmap = await createImageBitmap(cloneCanvas); p!.rgba = workingCopy(p!.bitmap).rgba; projects.touch(p!); schedule(); }
     catch { toast('تعذر تطبيق الاستنساخ', 'error'); }
-    cloneCanvas = cloneSample = null; cloneCtx = cloneSampleCtx = null; cloneOffset = null;
+    cloneCanvas = cloneSample = cloneStampCanvas = null; cloneCtx = cloneSampleCtx = cloneStampCtx = null; cloneOffset = null;
   }
 
   // --- viewport: zoom/pan changes only the preview, never the photo pixels or export dimensions
