@@ -168,15 +168,37 @@ export function editorScreen(): Screen {
     loadFont(l.font).then(schedule); renderText(); schedule();
   }
 
+  // --- viewport: zoom/pan changes only the preview, never the photo pixels or export dimensions
+  let zoom = 1, panX = 0, panY = 0, panMode = false;
+  const pointers = new Map<number, { x: number; y: number }>();
+  let pinch: { distance: number; zoom: number; midX: number; midY: number; panX: number; panY: number } | null = null;
+  const applyView = () => { canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`; zoomLabel.textContent = `${Math.round(zoom * 100)}%`; };
+  const zoomLabel = h('span', { class: 'zoom-label', 'aria-live': 'polite' }, '100%');
+  const zoomIn = h('button', { class: 'zoom-btn', 'aria-label': 'تكبير', onclick: () => { zoom = Math.min(5, zoom * 1.25); applyView(); } }, '+');
+  const zoomOut = h('button', { class: 'zoom-btn', 'aria-label': 'تصغير', onclick: () => { zoom = Math.max(1, zoom / 1.25); if (zoom === 1) panX = panY = 0; applyView(); } }, '−');
+  const zoomReset = h('button', { class: 'zoom-btn zoom-reset', onclick: () => { zoom = 1; panX = panY = 0; applyView(); } }, 'ملاءمة');
+  const panToggle = h('button', { class: 'zoom-btn', 'aria-pressed': 'false', onclick: () => { panMode = !panMode; panToggle.setAttribute('aria-pressed', String(panMode)); panToggle.textContent = panMode ? 'تحريك: يعمل' : 'تحريك'; } }, 'تحريك');
+  const viewControls = h('div', { class: 'view-controls', 'aria-label': 'التحكم في عرض الصورة' }, zoomOut, zoomLabel, zoomIn, zoomReset, panToggle);
+
   // --- pointer input: brush (cut tool) or move text (text tool)
   let fontDrag = false;
   let last: { x: number; y: number } | null = null, drag: { dx: number; dy: number } | null = null;
+  let panPointer: { id: number; x: number; y: number; startX: number; startY: number } | null = null;
   const toImage = (e: PointerEvent) => {
     const r = canvas.getBoundingClientRect();
     return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H, k: W / r.width };
   };
   const stamp = (x: number, y: number, k: number) => (tool === 'obj' ? paintBrush(objMask, W, H, x, y, radiusPx * k, 0.8, objMode === 'rub' ? 'erase' : 'restore') : paintBrush(p.mask!, W, H, x, y, radiusPx * k, hardness, mode));
   canvas.addEventListener('pointerdown', (e) => {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      const pair = [...pointers.values()], dx = pair[1].x - pair[0].x, dy = pair[1].y - pair[0].y;
+      const midX = (pair[0].x + pair[1].x) / 2, midY = (pair[0].y + pair[1].y) / 2;
+      pinch = { distance: Math.max(1, Math.hypot(dx, dy)), zoom, midX, midY, panX, panY };
+      last = null; drag = null; cropDrag = null; fontDrag = false;
+      canvas.setPointerCapture(e.pointerId); return;
+    }
+    if (panMode) { panPointer = { id: e.pointerId, x: e.clientX, y: e.clientY, startX: panX, startY: panY }; canvas.setPointerCapture(e.pointerId); return; }
     const pt = toImage(e);
     if (tool === 'text') {
       selected = hitTest(boxes, pt.x, pt.y);
@@ -194,6 +216,16 @@ export function editorScreen(): Screen {
     redo = []; syncHistory(); stamp(pt.x, pt.y, pt.k); last = pt; schedule();
   });
   canvas.addEventListener('pointermove', (e) => {
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pointers.size >= 2) {
+      const pair = [...pointers.values()], dx = pair[1].x - pair[0].x, dy = pair[1].y - pair[0].y;
+      const midX = (pair[0].x + pair[1].x) / 2, midY = (pair[0].y + pair[1].y) / 2;
+      zoom = Math.max(1, Math.min(5, pinch.zoom * Math.hypot(dx, dy) / pinch.distance));
+      panX = pinch.panX + midX - pinch.midX; panY = pinch.panY + midY - pinch.midY;
+      if (zoom === 1) panX = panY = 0;
+      applyView(); return;
+    }
+    if (panPointer?.id === e.pointerId) { panX = panPointer.startX + e.clientX - panPointer.x; panY = panPointer.startY + e.clientY - panPointer.y; applyView(); return; }
     const pt = toImage(e);
     const l = cur();
     if (cropDrag) { cropMove(pt); return; }
@@ -204,7 +236,12 @@ export function editorScreen(): Screen {
     for (let d = stepPx; d <= dist; d += stepPx) stamp(last.x + ((pt.x - last.x) * d) / dist, last.y + ((pt.y - last.y) * d) / dist, pt.k);
     stamp(pt.x, pt.y, pt.k); last = pt; schedule();
   });
-  for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, () => { last = null; drag = null; fontDrag = false; cropUp(); });
+  for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, (e: Event) => {
+    const pe = e as PointerEvent; pointers.delete(pe.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (panPointer?.id === pe.pointerId) panPointer = null;
+    last = null; drag = null; fontDrag = false; cropUp();
+  });
 
   // --- remove object (S09): paint (or auto-select text), then fill with the MI-GAN model on the phone
   const setOverlay = (msg: string) => { (overlay.firstChild as HTMLElement).textContent = msg; };
@@ -531,11 +568,12 @@ export function editorScreen(): Screen {
     h('header', { class: 'topbar' },
       h('button', { class: 'icon-btn', 'aria-label': t.editor.back, onclick: () => go('/') }, '→'),
       h('div', { class: 'spacer' }), undoBtn, redoBtn, h('button', { class: 'btn primary small', onclick: openExport }, t.editor.export)),
-    h('div', { class: 'stage checker' }, canvas, overlay),
+    h('div', { class: 'stage checker' }, canvas, viewControls, overlay),
     h('div', { class: 'actions' }, runBtn),
     cutPanel, bgPanel, textPanel, editPanel, objPanel, fontPanel, cropPanel, exportSheet,
     h('nav', { class: 'toolstrip', 'aria-label': 'tools' }, ...strip.map(([b]) => b)));
 
+  applyView();
   draw();
   return { el, dispose: () => { job?.cancel(); if (raf) cancelAnimationFrame(raf); } };
 }
