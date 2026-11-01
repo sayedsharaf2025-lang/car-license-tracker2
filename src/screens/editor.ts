@@ -227,7 +227,7 @@ export function editorScreen(): Screen {
     canvas.classList.add('clone-pick-source'); toast('تم مسح المصدر'); schedule();
   } }, 'مسح المصدر');
   const cloneAlignedBtn: HTMLButtonElement = chip('محاذي (Aligned)', true, () => {
-    cloneAligned = !cloneAligned; cloneAlignedBtn.setAttribute('aria-pressed', String(cloneAligned));
+    cloneAligned = !cloneAligned; cloneOffset = null; cloneAlignedBtn.setAttribute('aria-pressed', String(cloneAligned));
     cloneAlignedBtn.textContent = cloneAligned ? 'محاذي (Aligned)' : 'غير محاذي (Free)';
     if (!cloneAligned) cloneOffset = null;
   });
@@ -350,6 +350,7 @@ export function editorScreen(): Screen {
     }
     if (panPointer?.id === e.pointerId) { panX = panPointer.startX + e.clientX - panPointer.x; panY = panPointer.startY + e.clientY - panPointer.y; applyView(); return; }
     const pt = toImage(e);
+    if (tool === 'clone') { cloneCursorPos = { x: pt.x, y: pt.y }; schedule(); }
     const l = cur();
     if (cropDrag) { cropMove(pt); return; }
     if (drag && l) { l.cx = pt.x / W + drag.dx; l.cy = pt.y / H + drag.dy; schedule(); return; }
@@ -360,6 +361,7 @@ export function editorScreen(): Screen {
     for (let d = stepPx; d <= dist; d += stepPx) stamp(last.x + ((pt.x - last.x) * d) / dist, last.y + ((pt.y - last.y) * d) / dist, pt.k);
     stamp(pt.x, pt.y, pt.k); last = pt; schedule();
   });
+  canvas.addEventListener('pointerleave', () => { if (!isCloning) { cloneCursorPos = null; if (tool === 'clone') schedule(); } });
   for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, (e: Event) => {
     const pe = e as PointerEvent; pointers.delete(pe.pointerId);
     if (pointers.size < 2) pinch = null;
