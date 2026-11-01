@@ -36,7 +36,7 @@ export function drawScene(
   const boxes: Box[] = [];
   for (const t of texts) {
     if (t.visible === false) continue;
-    const px = t.size * W, lh = px * 1.3, lines = t.text.split('\\n');
+    const px = t.size * W, lh = px * 1.3, lines = t.text.split(/\r?\n/);
     ctx.font = fontCss(t.font, px);
     ctx.fillStyle = t.color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.shadowColor = t.shadowColor ?? 'transparent'; ctx.shadowBlur = t.shadowBlur ?? 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
