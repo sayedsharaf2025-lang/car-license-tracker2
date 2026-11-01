@@ -515,10 +515,13 @@ export function editorScreen(): Screen {
     if (!text) { toast(t.font.needText); return; }
     const ranked = await findFonts(p!.rgba, W, sel, text).catch(() => []);
     if (!ranked.length) { toast(t.font.fail, 'error'); return; }
-    fontResults.replaceChildren(h('h2', {}, t.font.results), ...ranked.slice(0, 5).map((r) => {
-      const b = h('button', { class: 'btn secondary result', 'aria-label': `${t.font.apply} ${r.font}`, onclick: () => useFont(r.font, text) }, `${r.font}  ·  ${Math.round(r.score * 100)}%`);
-      b.style.fontFamily = `"${r.font}", sans-serif`; return b;
-    }), h('p', { class: 'muted' }, t.font.note));
+    fontResults.replaceChildren(h('h2', {}, t.font.results), ...ranked.slice(0, 10).map((r) => {
+      const b = h('button', { class: 'btn secondary result font-result', 'aria-label': t.font.apply + ' ' + r.font, onclick: () => useFont(r.font, text) },
+        h('span', { class: 'font-result-name' }, r.font),
+        h('span', { class: 'font-result-preview', dir: /[\\u0600-\\u06FF]/.test(text) ? 'rtl' : 'ltr' }, text),
+        h('span', { class: 'font-result-score' }, Math.round(r.score * 100) + '% تشابه'));
+      b.style.fontFamily = '"' + r.font + '", sans-serif'; return b;
+    }), h('p', { class: 'muted' }, 'النتيجة تقيس تشابه شكل الحروف وليست نسبة تأكد قطعية. ' + t.font.note));
   }
   function useFont(font: string, text: string) {
     const l = { id: crypto.randomUUID(), text, font, size: 0.09, color: '#ffffff', cx: 0.5, cy: 0.5 };
