@@ -108,7 +108,7 @@ export function paintBrush(
 
 /** Converts a confidence mask to a binary 0/255 selection at the chosen threshold. */
 export function thresholdMask(mask: Uint8Array, threshold = 128): Uint8Array {
-  const t = Math.max(0, Math.min(255, Math.round(threshold)));
+  const t = Math.max(0, Math.min(256, Math.round(threshold)));
   const out = new Uint8Array(mask.length);
   for (let i = 0; i < mask.length; i++) out[i] = mask[i] >= t ? 255 : 0;
   return out;
