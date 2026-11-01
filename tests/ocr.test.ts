@@ -22,7 +22,7 @@ test('fixArabicOrder reverses Arabic but keeps numbers readable', () => {
   assert.equal(fixArabicOrder('ab 12 \u0628\u0627'), '\u0627\u0628 12 ab'); // Latin and number runs keep their own order
 });
 test('Arabic combining marks stay attached to letters after order correction', () => {
-  assert.equal(fixArabicOrder('\\u064e\\u0627'), '\\u0627\\u064e');
+  assert.equal(fixArabicOrder('\u064e\u0627'), '\u0627\u064e');
 });
 test('preprocess shapes', () => {
   const rgba = new Uint8ClampedArray(200 * 100 * 4).fill(128);
