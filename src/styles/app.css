@@ -75,3 +75,9 @@ input[type="color"] { min-width: var(--tap-min); min-height: var(--tap-min); bor
 /* Clone Stamp v2 visual feedback */
 .stage-canvas.clone-pick-source { cursor: crosshair; touch-action: none; }
 .stage-canvas { touch-action: none; }
+
+/* Task strip: clear open/closed state and comfortable horizontal scrolling on phones. */
+.toolstrip { flex: 0 0 var(--tool-strip); min-width: 0; overscroll-behavior-inline: contain; scrollbar-width: thin; }
+.tool { flex: 0 0 auto; min-height: 48px; position: relative; }
+.tool[aria-expanded="true"] { color: var(--color-accent); background: var(--color-surface-raised); border-bottom-color: var(--color-accent); font-weight: 700; }
+.tool:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -3px; border-radius: var(--radius-sm); }
