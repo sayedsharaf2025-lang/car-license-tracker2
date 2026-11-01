@@ -10,7 +10,7 @@ import { readText, detectText } from '../lib/ocr.ts';
 import { workingCopy } from '../lib/image.ts';
 import { segment, SegmentError } from '../lib/segment.ts';
 import { renderExport, saveFile, shareBlob, formatOfMime, type Format, type Saved } from '../lib/export.ts';
-import { drawScene, hitTest, type Box } from '../lib/scene.ts';
+import { drawScene, hitTest, type Box, type Background, type TextLayer } from '../lib/scene.ts';
 import { FONTS, fontsFor, loadFont, scriptOf, fontCss } from '../lib/fonts.ts';
 import { paintRects, padRect, inkColor } from '../lib/inpaintMath.ts';
 import { toGray, inkMask } from '../lib/fontMatch.ts';
@@ -32,7 +32,8 @@ export function editorScreen(): Screen {
   let mode: BrushMode = 'erase';
   let radiusPx = 28, hardness = 0.7;
   let showOriginal = false;
-  let undo: Uint8Array[] = [], redo: Uint8Array[] = [];
+  type HistoryState = { mask: Uint8Array | null; texts: TextLayer[]; bg: Background; rgba?: Uint8ClampedArray };
+  let undo: HistoryState[] = [], redo: HistoryState[] = [];
   let job: { cancel: () => void } | null = null;
   let raf = 0;
   let boxes: Box[] = [];
@@ -95,10 +96,23 @@ export function editorScreen(): Screen {
   const undoBtn = h('button', { class: 'icon-btn', 'aria-label': t.editor.undo, disabled: true, onclick: () => step(undo, redo) }, '↶');
   const redoBtn = h('button', { class: 'icon-btn', 'aria-label': t.editor.redo, disabled: true, onclick: () => step(redo, undo) }, '↷');
   const syncHistory = () => { undoBtn.disabled = !undo.length; redoBtn.disabled = !redo.length; };
-  function step(from: Uint8Array[], to: Uint8Array[]) {
+  function snapshot(includePixels = false): HistoryState {
+    return { mask: p!.mask?.slice() ?? null, texts: structuredClone(p!.texts), bg: p!.bg,
+      ...(includePixels ? { rgba: p!.rgba.slice() } : {}) };
+  }
+  function captureHistory(includePixels = false) {
+    undo.push(snapshot(includePixels));
+    if (undo.length > 20) undo.shift();
+    redo = []; syncHistory();
+  }
+  function step(from: HistoryState[], to: HistoryState[]) {
     const snap = from.pop();
-    if (!snap || !p!.mask) return;
-    to.push(p!.mask.slice()); p!.mask.set(snap); syncHistory(); schedule();
+    if (!snap) return;
+    to.push(snapshot(!!snap.rgba));
+    p!.mask = snap.mask?.slice() ?? null;
+    p!.texts = structuredClone(snap.texts); p!.bg = snap.bg;
+    if (snap.rgba) p!.rgba = snap.rgba.slice();
+    syncHistory(); renderText(); renderBg(); schedule(); projects.touch(p!);
   }
 
   const chip = (label: string, pressed: boolean, on: () => void): HTMLButtonElement =>
@@ -123,26 +137,26 @@ export function editorScreen(): Screen {
     slider(t.editor.hardness, 0, 100, 70, (v) => { hardness = v / 100; }), compareBtn);
 
   // --- background panel (S06)
-  const colorInput: HTMLInputElement = h('input', { type: 'color', value: '#ffffff', 'aria-label': t.bg.color, oninput: () => { p.bg = { kind: 'color', color: colorInput.value }; renderBg(); schedule(); } });
+  const colorInput: HTMLInputElement = h('input', { type: 'color', value: '#ffffff', 'aria-label': t.bg.color, onfocus: () => captureHistory(), oninput: () => { p.bg = { kind: 'color', color: colorInput.value }; renderBg(); schedule(); } });
   const imageInput: HTMLInputElement = h('input', { type: 'file', accept: 'image/*', class: 'visually-hidden', id: 'bg-input', onchange: async () => {
     const f = imageInput.files?.[0]; imageInput.value = '';
     if (!f) return;
-    try { p.bg = { kind: 'image', bitmap: await createImageBitmap(f, { imageOrientation: 'from-image' }) }; renderBg(); schedule(); }
+    try { const bitmap = await createImageBitmap(f, { imageOrientation: 'from-image' }); captureHistory(); p.bg = { kind: 'image', bitmap }; renderBg(); schedule(); }
     catch { toast(t.bg.failed, 'error'); }
   } });
   const bgPanel = h('section', { class: 'sheet', hidden: true });
   function renderBg() {
     setChildren(bgPanel,
       h('div', { class: 'row' },
-        chip(t.bg.transparent, p!.bg.kind === 'transparent', () => { p!.bg = { kind: 'transparent' }; renderBg(); schedule(); }),
-        chip(t.bg.color, p!.bg.kind === 'color', () => { p!.bg = { kind: 'color', color: colorInput.value }; renderBg(); schedule(); }),
+        chip(t.bg.transparent, p!.bg.kind === 'transparent', () => { captureHistory(); p!.bg = { kind: 'transparent' }; renderBg(); schedule(); }),
+        chip(t.bg.color, p!.bg.kind === 'color', () => { captureHistory(); p!.bg = { kind: 'color', color: colorInput.value }; renderBg(); schedule(); }),
         colorInput),
       h('div', { class: 'row' }, h('label', { class: 'btn secondary', for: 'bg-input' }, t.bg.pickImage), imageInput));
   }
 
   // --- text panel (S13)
-  const textArea: HTMLTextAreaElement = h('textarea', { class: 'field', rows: 2, 'aria-label': t.text.input, oninput: () => { const l = cur(); if (l) { l.text = textArea.value || ' '; schedule(); } } });
-  const textColor: HTMLInputElement = h('input', { type: 'color', value: '#ffffff', 'aria-label': t.text.color, oninput: () => { const l = cur(); if (l) { l.color = textColor.value; schedule(); } } });
+  const textArea: HTMLTextAreaElement = h('textarea', { class: 'field', rows: 2, 'aria-label': t.text.input, onfocus: () => captureHistory(), oninput: () => { const l = cur(); if (l) { l.text = textArea.value || ' '; schedule(); } } });
+  const textColor: HTMLInputElement = h('input', { type: 'color', value: '#ffffff', 'aria-label': t.text.color, onfocus: () => captureHistory(), oninput: () => { const l = cur(); if (l) { l.color = textColor.value; schedule(); } } });
   const fontRow = h('div', { class: 'row fontrow' });
   const textPanel = h('section', { class: 'sheet', hidden: true });
   const cur = () => p.texts.find((x) => x.id === selected) ?? null;
@@ -150,7 +164,7 @@ export function editorScreen(): Screen {
     const l = cur();
     const first = fontsFor(l?.text ?? 'ن');
     fontRow.replaceChildren(...[...first, ...FONTS.filter((f) => !first.includes(f))].map((f) => {
-      const b = chip(f, l?.font === f, () => { if (l) { l.font = f; loadFont(f).then(schedule); renderText(); schedule(); } });
+      const b = chip(f, l?.font === f, () => { if (l) { captureHistory(); l.font = f; loadFont(f).then(schedule); renderText(); schedule(); } });
       b.style.fontFamily = `"${f}", sans-serif`; return b;
     }));
     setChildren(textPanel,
@@ -158,13 +172,19 @@ export function editorScreen(): Screen {
       l ? textArea : h('p', { class: 'muted' }, t.text.hint),
       l ? fontRow : null,
       l ? slider(t.text.size, 3, 20, Math.round(l.size * 100), (v) => { l.size = v / 100; schedule(); }) : null,
+      l ? slider('زاوية الدوران', 0, 360, Math.round(l.rotation ?? 0), (v) => { l.rotation = v; schedule(); }) : null,
       l ? h('div', { class: 'row' }, h('label', {}, t.text.color), textColor) : null,
-      l ? h('button', { class: 'btn ghost', onclick: () => { p!.texts = p!.texts.filter((x) => x.id !== l.id); selected = null; renderText(); schedule(); } }, t.text.del) : null);
+      h('h3', {}, 'الطبقات'),
+      ...p!.texts.map((layer) => h('div', { class: 'layer-row' },
+        h('button', { class: 'chip', 'aria-pressed': String(layer.id === selected), onclick: () => { selected = layer.id; renderText(); schedule(); } }, layer.text.slice(0, 24) || 'نص فارغ'),
+        h('button', { class: 'chip', 'aria-label': layer.visible === false ? 'إظهار الطبقة' : 'إخفاء الطبقة', onclick: () => { captureHistory(); layer.visible = layer.visible === false; renderText(); schedule(); } }, layer.visible === false ? 'إظهار' : 'إخفاء'),
+        h('button', { class: 'chip', 'aria-label': 'حذف الطبقة', onclick: () => { captureHistory(); p!.texts = p!.texts.filter((x) => x.id !== layer.id); if (selected === layer.id) selected = null; renderText(); schedule(); } }, 'حذف'))),
+      l ? h('button', { class: 'btn ghost', onclick: () => { captureHistory(); p!.texts = p!.texts.filter((x) => x.id !== l.id); selected = null; renderText(); schedule(); } }, t.text.del) : null);
     if (l) { textArea.value = l.text; textColor.value = l.color; }
   }
   function addText() {
     const l = { id: crypto.randomUUID(), text: t.text.sample, font: FONTS[0], size: 0.09, color: '#ffffff', cx: 0.5, cy: 0.5 };
-    p!.texts.push(l); selected = l.id;
+    captureHistory(); p!.texts.push(l); selected = l.id;
     loadFont(l.font).then(schedule); renderText(); schedule();
   }
 
@@ -203,7 +223,7 @@ export function editorScreen(): Screen {
     if (tool === 'text') {
       selected = hitTest(boxes, pt.x, pt.y);
       const l = cur();
-      if (l) { canvas.setPointerCapture(e.pointerId); drag = { dx: l.cx - pt.x / W, dy: l.cy - pt.y / H }; }
+      if (l) { captureHistory(); canvas.setPointerCapture(e.pointerId); drag = { dx: l.cx - pt.x / W, dy: l.cy - pt.y / H }; }
       renderText(); schedule(); return;
     }
     if (tool === 'font') { canvas.setPointerCapture(e.pointerId); sel = { x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y }; fontDrag = true; schedule(); return; }
@@ -212,8 +232,7 @@ export function editorScreen(): Screen {
     if (tool === 'crop') { cropDown(pt, e); return; }
     if (tool !== 'cut' || !p.mask || job) return;
     canvas.setPointerCapture(e.pointerId);
-    undo.push(p.mask.slice()); if (undo.length > UNDO_LIMIT) undo.shift();
-    redo = []; syncHistory(); stamp(pt.x, pt.y, pt.k); last = pt; schedule();
+    captureHistory(); stamp(pt.x, pt.y, pt.k); last = pt; schedule();
   });
   canvas.addEventListener('pointermove', (e) => {
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -291,6 +310,7 @@ export function editorScreen(): Screen {
       const c = document.createElement('canvas'); c.width = fw; c.height = fh;
       const cx = c.getContext('2d', { willReadFrequently: true })!; cx.drawImage(p!.bitmap, 0, 0);
       const img = cx.getImageData(0, 0, fw, fh);
+      captureHistory(true);
       img.data.set(await fillAI(fw, fh, img.data, holeFn(fw, fh))); cx.putImageData(img, 0, 0);
       p!.bitmap = await createImageBitmap(c); p!.rgba = workingCopy(p!.bitmap).rgba; projects.touch(p!);
       return true;
@@ -501,7 +521,7 @@ export function editorScreen(): Screen {
   }
   function useFont(font: string, text: string) {
     const l = { id: crypto.randomUUID(), text, font, size: 0.09, color: '#ffffff', cx: 0.5, cy: 0.5 };
-    p!.texts.push(l); selected = l.id; showTool('text');
+    captureHistory(); p!.texts.push(l); selected = l.id; showTool('text');
   }
 
   // --- remove background (worker)
@@ -513,7 +533,7 @@ export function editorScreen(): Screen {
     overlay.hidden = false; runBtn.disabled = true;
     const j = segment(p!.rgba, W, H, () => {}); job = j;
     try {
-      p!.mask = await j.promise; undo = []; redo = []; syncHistory();
+      const nextMask = await j.promise; captureHistory(); p!.mask = nextMask;
       runBtn.textContent = t.editor.removeBg; projects.touch(p!); showTool('cut'); toast(t.editor.cutoutDone);
     } catch (err) {
       const code = err instanceof SegmentError ? err.code : 'failed';
