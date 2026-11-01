@@ -18,9 +18,10 @@ import type { Rect } from '../lib/ocrMath.ts';
 import { clampRect, moveRect, nearestCorner, dragCorner, aspectBox, polyBBox, type CRect, type Corner } from '../lib/geometry.ts';
 import { SHAPES, shapePath, type Shape, type Pt } from '../lib/shapes.ts';
 import { cropProject, resizeProject, undoGeometry } from '../lib/transform.ts';
+import { DEFAULT_ENHANCE, autoSettings, enhancePixels, type EnhanceSettings } from '../lib/enhance.ts';
 
 const UNDO_LIMIT = 10;
-type Tool = 'cut' | 'bg' | 'text' | 'obj' | 'font' | 'edit' | 'crop' | 'clone';
+type Tool = 'cut' | 'bg' | 'text' | 'obj' | 'font' | 'edit' | 'crop' | 'clone' | 'enhance';
 
 // S04 editor + S05 remove background + S06 background + S13 text + S16 export.
 export function editorScreen(): Screen {
@@ -204,6 +205,43 @@ export function editorScreen(): Screen {
     const l = { id: crypto.randomUUID(), text: t.text.sample, font: FONTS[0], size: 0.09, color: '#ffffff', cx: 0.5, cy: 0.5 };
     captureHistory(); p!.texts.push(l); selected = l.id;
     loadFont(l.font).then(schedule); renderText(); schedule();
+  }
+
+  // --- offline photo enhancement
+  let enhanceSettings: EnhanceSettings = { ...DEFAULT_ENHANCE };
+  const enhancePanel = h('section', { class: 'sheet', hidden: true });
+  async function applyEnhancement() {
+    if (job) return;
+    overlay.hidden = false; setOverlay('جاري تحسين الصورة...');
+    await new Promise((r) => setTimeout(r, 20));
+    try {
+      const c = document.createElement('canvas'); c.width = p!.bitmap.width; c.height = p!.bitmap.height;
+      const x = c.getContext('2d', { willReadFrequently: true })!;
+      x.drawImage(p!.bitmap, 0, 0);
+      const image = x.getImageData(0, 0, c.width, c.height);
+      captureHistory(true);
+      image.data.set(enhancePixels(image.data, c.width, c.height, enhanceSettings));
+      x.putImageData(image, 0, 0);
+      p!.bitmap = await createImageBitmap(c);
+      p!.rgba = workingCopy(p!.bitmap).rgba;
+      projects.touch(p!); schedule(); toast('تم تطبيق التحسينات');
+    } catch { toast('تعذر تحسين الصورة', 'error'); }
+    finally { overlay.hidden = true; setOverlay(t.editor.working); }
+  }
+  function renderEnhance() {
+    const set = (key: keyof EnhanceSettings, value: number) => { enhanceSettings = { ...enhanceSettings, [key]: value }; };
+    setChildren(enhancePanel,
+      h('p', { class: 'muted' }, 'تحسين محلي على الجهاز؛ لا يتم إرسال الصورة إلى الإنترنت.'),
+      h('div', { class: 'row' },
+        chip('تلقائي', false, () => { enhanceSettings = { ...DEFAULT_ENHANCE, ...autoSettings(p!.rgba), sharpen: 12, denoise: 8 }; renderEnhance(); }),
+        chip('إعادة ضبط', false, () => { enhanceSettings = { ...DEFAULT_ENHANCE }; renderEnhance(); })),
+      slider('الإضاءة', -50, 50, enhanceSettings.brightness, (v) => set('brightness', v)),
+      slider('التباين', -50, 50, enhanceSettings.contrast, (v) => set('contrast', v)),
+      slider('تشبع الألوان', -100, 100, enhanceSettings.saturation, (v) => set('saturation', v)),
+      slider('دفء الألوان', -100, 100, enhanceSettings.warmth, (v) => set('warmth', v)),
+      slider('حدة التفاصيل', 0, 100, enhanceSettings.sharpen, (v) => set('sharpen', v)),
+      slider('تقليل التشويش', 0, 100, enhanceSettings.denoise, (v) => set('denoise', v)),
+      h('button', { class: 'btn primary', onclick: applyEnhancement }, 'تطبيق التحسين على الصورة'));
   }
 
   // --- clone stamp: photo texture/background retouching
@@ -687,13 +725,13 @@ export function editorScreen(): Screen {
     tool = next; exportSheet.hidden = true;
     cutPanel.hidden = !(next === 'cut' && p!.mask);
     bgPanel.hidden = next !== 'bg'; textPanel.hidden = next !== 'text'; objPanel.hidden = next !== 'obj'; fontPanel.hidden = next !== 'font';
-    editPanel.hidden = next !== 'edit'; cropPanel.hidden = next !== 'crop'; clonePanel.hidden = next !== 'clone'; if (next !== 'clone') { cloneCursorPos = null; canvas.classList.remove('clone-pick-source'); } else if (choosingCloneSource) canvas.classList.add('clone-pick-source'); if (next !== 'edit') { pick = -1; }
+    editPanel.hidden = next !== 'edit'; cropPanel.hidden = next !== 'crop'; clonePanel.hidden = next !== 'clone'; enhancePanel.hidden = next !== 'enhance'; if (next === 'enhance') renderEnhance(); if (next !== 'clone') { cloneCursorPos = null; canvas.classList.remove('clone-pick-source'); } else if (choosingCloneSource) canvas.classList.add('clone-pick-source'); if (next !== 'edit') { pick = -1; }
     if (next === 'bg') renderBg(); if (next === 'text') renderText(); if (next === 'crop') renderCrop();
     strip.forEach(([b, k]) => b.setAttribute('aria-pressed', String(k === next))); schedule();
   }
   const mk = (label: string, k: Tool | null): [HTMLButtonElement, Tool | null] =>
     [h('button', { class: 'tool', 'aria-pressed': String(k === 'cut'), onclick: () => (k ? showTool(k) : toast(t.editor.soon)) }, label), k];
-  const strip = [mk(t.tools.removeBg, 'cut'), mk(t.tools.background, 'bg'), mk(t.tools.text, 'text'), mk(t.tools.editText, 'edit'), mk(t.tools.removeObject, 'obj'), mk(t.tools.fonts, 'font'), mk(t.tools.crop, 'crop'), mk('استنساخ', 'clone')];
+  const strip = [mk(t.tools.removeBg, 'cut'), mk(t.tools.background, 'bg'), mk(t.tools.text, 'text'), mk(t.tools.editText, 'edit'), mk(t.tools.removeObject, 'obj'), mk(t.tools.fonts, 'font'), mk(t.tools.crop, 'crop'), mk('استنساخ', 'clone'), mk('تحسين', 'enhance')];
 
   const el = h('main', { class: 'editor' },
     h('header', { class: 'topbar' },
@@ -701,7 +739,7 @@ export function editorScreen(): Screen {
       h('div', { class: 'spacer' }), undoBtn, redoBtn, h('button', { class: 'btn primary small', onclick: openExport }, t.editor.export)),
     h('div', { class: 'stage checker' }, canvas, viewControls, overlay),
     h('div', { class: 'actions' }, runBtn),
-    cutPanel, bgPanel, textPanel, editPanel, objPanel, fontPanel, cropPanel, clonePanel, exportSheet,
+    cutPanel, bgPanel, textPanel, editPanel, objPanel, fontPanel, cropPanel, clonePanel, enhancePanel, exportSheet,
     h('nav', { class: 'toolstrip', 'aria-label': 'tools' }, ...strip.map(([b]) => b)));
 
   applyView();
