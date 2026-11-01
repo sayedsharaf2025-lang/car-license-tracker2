@@ -29,7 +29,7 @@ export function editorScreen(): Screen {
   if (!p) { queueMicrotask(() => go('/')); return { el: h('div') }; }
   const W = p.w, H = p.h;
 
-  let tool: Tool = 'cut';
+  let tool: Tool | null = null;
   let mode: BrushMode = 'erase';
   let radiusPx = 28, hardness = 0.7;
   let showOriginal = false;
