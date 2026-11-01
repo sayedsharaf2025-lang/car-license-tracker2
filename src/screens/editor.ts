@@ -19,6 +19,7 @@ import { clampRect, moveRect, nearestCorner, dragCorner, aspectBox, polyBBox, ty
 import { SHAPES, shapePath, type Shape, type Pt } from '../lib/shapes.ts';
 import { cropProject, resizeProject, undoGeometry } from '../lib/transform.ts';
 import { DEFAULT_ENHANCE, autoSettings, enhancePixels, type EnhanceSettings } from '../lib/enhance.ts';
+import { cloneSourcePoint, interpolateCloneStroke } from '../lib/cloneMath.ts';
 
 const UNDO_LIMIT = 10;
 type Tool = 'cut' | 'bg' | 'text' | 'obj' | 'font' | 'edit' | 'crop' | 'clone' | 'enhance';
@@ -365,7 +366,7 @@ export function editorScreen(): Screen {
     cloneStampCtx.globalCompositeOperation = 'source-over';
     cloneCtx.save(); cloneCtx.globalAlpha = cloneOpacity;
     cloneCtx.drawImage(cloneStampCanvas, cx - r, cy - r, 2 * r, 2 * r); cloneCtx.restore();
-    currentSourcePos = { x: x + cloneOffset.x / sx, y: y + cloneOffset.y / sy };
+    currentSourcePos = cloneSourcePoint({ x, y }, cloneOffset, sx, sy);
   }
   async function finishCloneStroke() {
     if (!cloneCanvas || !cloneCtx) { isCloning = false; return; }
@@ -442,7 +443,7 @@ export function editorScreen(): Screen {
     if (cropDrag) { cropMove(pt); return; }
     if (drag && l) { l.cx = pt.x / W + drag.dx; l.cy = pt.y / H + drag.dy; schedule(); return; }
     if (fontDrag && sel) { sel.x1 = Math.max(0, Math.min(W, pt.x)); sel.y1 = Math.max(0, Math.min(H, pt.y)); schedule(); return; }
-    if (tool === 'clone' && last && isCloning) { const dist = Math.hypot(pt.x-last.x, pt.y-last.y), stepPx = Math.max(1, radiusPx/4); for (let d=stepPx; d<=dist; d+=stepPx) paintClone(last.x+(pt.x-last.x)*d/dist,last.y+(pt.y-last.y)*d/dist); paintClone(pt.x,pt.y); last=pt; schedule(); return; }
+    if (tool === 'clone' && last && isCloning) { for (const point of interpolateCloneStroke(last, pt, Math.max(1, radiusPx / 4))) paintClone(point.x, point.y); last = pt; schedule(); return; }
     if (!last || (tool !== 'obj' && !p.mask)) return;
     const dist = Math.hypot(pt.x - last.x, pt.y - last.y), stepPx = Math.max(1, (radiusPx * pt.k) / 3);
     for (let d = stepPx; d <= dist; d += stepPx) stamp(last.x + ((pt.x - last.x) * d) / dist, last.y + ((pt.y - last.y) * d) / dist, pt.k);
