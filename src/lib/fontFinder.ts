@@ -14,7 +14,7 @@ function renderShape(font: string, text: string) {
   ctx.fillStyle = '#000'; ctx.font = fontCss(font, px); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.direction = isArabic(text) ? 'rtl' : 'ltr';
   lines.forEach((l, i) => ctx.fillText(l, w / 2, 20 + lh * i + lh / 2));
-  return normalizeInk(inkMask(toGray(ctx.getImageData(0, 0, w, h).data, w * h)), w, h);
+  return normalizeInk(inkMask(toGray(ctx.getImageData(0, 0, w, h).data, w * h), w, h), w, h);
 }
 
 /** Copies the selected rectangle out of an RGBA image. */
@@ -23,8 +23,9 @@ export function cropSel(rgba: Uint8ClampedArray, W: number, sel: Sel) {
   const w = Math.max(1, Math.ceil(Math.abs(sel.x1 - sel.x0))), h = Math.max(1, Math.ceil(Math.abs(sel.y1 - sel.y0)));
   const crop = new Uint8ClampedArray(w * h * 4);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const s = ((y0 + y) * W + (x0 + x)) * 4, d = (y * w + x) * 4;
-    crop[d] = rgba[s]; crop[d + 1] = rgba[s + 1]; crop[d + 2] = rgba[s + 2]; crop[d + 3] = 255;
+    const sx = Math.max(0, Math.min(W - 1, x0 + x)), sy = Math.max(0, Math.floor(y0 + y));
+    const s = (sy * W + sx) * 4, d = (y * w + x) * 4, a = (rgba[s + 3] ?? 255) / 255;
+    crop[d] = Math.round(rgba[s] * a + 255 * (1 - a)); crop[d + 1] = Math.round(rgba[s + 1] * a + 255 * (1 - a)); crop[d + 2] = Math.round(rgba[s + 2] * a + 255 * (1 - a)); crop[d + 3] = 255;
   }
   return { crop, w, h };
 }
@@ -32,7 +33,7 @@ export function cropSel(rgba: Uint8ClampedArray, W: number, sel: Sel) {
 /** Returns the bundled fonts ordered by how closely `text` drawn in them matches the selected area. Empty if the area has no readable shape. */
 export async function findFonts(rgba: Uint8ClampedArray, W: number, sel: Sel, text: string) {
   const { crop, w, h } = cropSel(rgba, W, sel);
-  const query = normalizeInk(inkMask(toGray(crop, w * h)), w, h);
+  const query = normalizeInk(inkMask(toGray(crop, w * h), w, h), w, h);
   if (!query) return [];
   const names = fontsFor(text);
   await Promise.all(names.map((f) => loadFont(f)));
