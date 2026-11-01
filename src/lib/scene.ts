@@ -7,6 +7,9 @@ export interface Box { id: string; x0: number; y0: number; x1: number; y1: numbe
 
 export { FONTS, isArabic };
 
+/** Split editable text into display lines, supporting Windows and Unix newlines. */
+export function splitTextLines(text: string): string[] { return text.split(/\r?\n/); }
+
 /** Source rectangle that makes an image cover a W x H area (centered crop). */
 export function coverRect(iw: number, ih: number, W: number, H: number) {
   const s = Math.max(W / iw, H / ih), sw = W / s, sh = H / s;
@@ -36,7 +39,7 @@ export function drawScene(
   const boxes: Box[] = [];
   for (const t of texts) {
     if (t.visible === false) continue;
-    const px = t.size * W, lh = px * 1.3, lines = t.text.split(/\r?\n/);
+    const px = t.size * W, lh = px * 1.3, lines = splitTextLines(t.text);
     ctx.font = fontCss(t.font, px);
     ctx.fillStyle = t.color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.shadowColor = t.shadowColor ?? 'transparent'; ctx.shadowBlur = t.shadowBlur ?? 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
