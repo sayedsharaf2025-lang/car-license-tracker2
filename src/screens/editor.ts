@@ -149,8 +149,11 @@ export function editorScreen(): Screen {
   function setMode(m: BrushMode) { mode = m; modeErase.setAttribute('aria-pressed', String(m === 'erase')); modeRestore.setAttribute('aria-pressed', String(m === 'restore')); }
   const compareBtn = h('button', { class: 'btn secondary' }, t.editor.holdOriginal);
   const hold = (on: boolean) => () => { showOriginal = on; schedule(); };
-  compareBtn.addEventListener('pointerdown', hold(true));
-  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) compareBtn.addEventListener(ev, hold(false));
+  const enhanceCompareBtn = h('button', { class: 'btn secondary' }, 'عرض الأصل (اضغط مطولًا)');
+  for (const b of [compareBtn, enhanceCompareBtn]) {
+    b.addEventListener('pointerdown', hold(true));
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, hold(false));
+  }
   const cutPanel = h('section', { class: 'sheet', hidden: true },
     h('div', { class: 'row' }, modeErase, modeRestore),
     slider(t.editor.size, 6, 90, radiusPx, (v) => { radiusPx = v; }),
@@ -251,7 +254,7 @@ export function editorScreen(): Screen {
         chip('إضاءة ضعيفة', false, () => { enhanceSettings = { ...DEFAULT_ENHANCE, brightness: 15, contrast: 8, warmth: 4, denoise: 32, sharpen: 8 }; renderEnhance(); }),
         chip('إعادة ضبط', false, () => { enhanceSettings = { ...DEFAULT_ENHANCE }; renderEnhance(); })),
       h('p', { class: 'muted' }, 'اضغط مطولًا على «عرض الأصل» للمقارنة قبل تطبيق النتيجة.'),
-      compareBtn,
+      enhanceCompareBtn,
       slider('الإضاءة', -50, 50, enhanceSettings.brightness, (v) => set('brightness', v)),
       slider('التباين', -50, 50, enhanceSettings.contrast, (v) => set('contrast', v)),
       slider('تشبع الألوان', -100, 100, enhanceSettings.saturation, (v) => set('saturation', v)),
