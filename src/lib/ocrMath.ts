@@ -47,7 +47,7 @@ export function groupLines(boxes: Rect[]): Rect[] {
 }
 
 /** Recognition input for one line: height 48, BGR, (v/255 - 0.5) / 0.5. */
-export function recPreprocess(rgba: Uint8ClampedArray, w: number, h: number, r: Rect, variant: 'original' | 'contrast' = 'original') {
+export function recPreprocess(rgba: Uint8ClampedArray, w: number, h: number, r: Rect, variant: 'original' | 'contrast' | 'binary' = 'original') {
   // Add a small context margin: cropped dots and edge strokes are common OCR failure causes.
   const mx = Math.max(2, Math.round((r.x1 - r.x0) * 0.025)), my = Math.max(2, Math.round((r.y1 - r.y0) * 0.10));
   const x0 = Math.max(0, Math.floor(r.x0) - mx), y0 = Math.max(0, Math.floor(r.y0) - my);
@@ -58,7 +58,7 @@ export function recPreprocess(rgba: Uint8ClampedArray, w: number, h: number, r: 
   const rw = Math.min(2048, Math.max(16, Math.round((REC_H * cw) / ch))), px = resizeRGBABilinear(crop, cw, ch, rw, REC_H);
   const plane = rw * REC_H, data = new Float32Array(3 * plane);
   let lo = 0, hi = 255;
-  if (variant === 'contrast') {
+  if (variant === 'contrast' || variant === 'binary') {
     const hist = new Uint32Array(256);
     for (let i = 0; i < plane; i++) {
       const k = i * 4, gray = Math.round(0.299 * px[k] + 0.587 * px[k + 1] + 0.114 * px[k + 2]);
@@ -69,14 +69,31 @@ export function recPreprocess(rgba: Uint8ClampedArray, w: number, h: number, r: 
     sum = 0; for (let i = 255; i >= 0; i--) { sum += hist[i]; if (sum >= cut) { hi = i; break; } }
     if (hi - lo < 32) { lo = 0; hi = 255; }
   }
+  let binaryThreshold = 128;
+  if (variant === 'binary') {
+    // Otsu threshold on the cropped line; useful for faint print over uneven paper.
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < plane; i++) { const k = i * 4; hist[Math.round(0.299 * px[k] + 0.587 * px[k + 1] + 0.114 * px[k + 2])]++; }
+    let total = 0, weighted = 0;
+    for (let i = 0; i < 256; i++) { total += hist[i]; weighted += i * hist[i]; }
+    let background = 0, sumBackground = 0, bestVariance = -1;
+    for (let i = 0; i < 256; i++) {
+      background += hist[i]; if (!background) continue;
+      const foreground = total - background; if (!foreground) break;
+      sumBackground += i * hist[i];
+      const meanB = sumBackground / background, meanF = (weighted - sumBackground) / foreground;
+      const variance = background * foreground * (meanB - meanF) ** 2;
+      if (variance > bestVariance) { bestVariance = variance; binaryThreshold = i; }
+    }
+  }
   for (let i = 0; i < plane; i++) {
     const k = i * 4;
     if (variant === 'original') {
       for (let chn = 0; chn < 3; chn++) data[chn * plane + i] = (px[k + (2 - chn)] / 255 - 0.5) / 0.5;
     } else {
       const gray = 0.299 * px[k] + 0.587 * px[k + 1] + 0.114 * px[k + 2];
-      const stretched = Math.max(0, Math.min(255, ((gray - lo) * 255) / (hi - lo)));
-      const v = (stretched / 255 - 0.5) / 0.5;
+      const value = variant === 'binary' ? (gray <= binaryThreshold ? 0 : 255) : Math.max(0, Math.min(255, ((gray - lo) * 255) / (hi - lo)));
+      const v = (value / 255 - 0.5) / 0.5;
       data[i] = v; data[plane + i] = v; data[2 * plane + i] = v;
     }
   }
