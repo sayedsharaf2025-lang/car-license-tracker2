@@ -69,3 +69,9 @@ test('binary OCR preprocessing handles uneven grayscale and stays finite', () =>
   assert.ok(binary.data.some(v => v < -0.9));
   assert.ok(binary.data.some(v => v > 0.9));
 });
+
+test('fixArabicOrder preserves Arabic-Indic and Persian digit runs in mixed Arabic text', () => {
+  assert.equal(fixArabicOrder('ab ١٢ با'), 'اب ١٢ ba');
+  assert.equal(fixArabicOrder('ab ۱۲ با'), 'اب ۱۲ ba');
+  assert.equal(fixArabicOrder('ab +١٢٫٥ با'), 'اب +١٢٫٥ ba');
+});
