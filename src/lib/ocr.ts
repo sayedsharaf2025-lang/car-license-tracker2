@@ -4,7 +4,7 @@ import type { Rect } from './ocrMath.ts';
 // A fresh worker per button press repeatedly downloads/parses large models.
 type OCRComparison = { engine: string; text: string }[];
 type OCRResult = string | OCRComparison | { words: Rect[]; lines: Rect[] };
-type Pending = { resolve: (value: OCRResult) => void; reject: (reason: Error) => void; mode: 'read' | 'compare' | 'detect'; timer: ReturnType<typeof setTimeout> };
+type Pending = { resolve: (value: unknown) => void; reject: (reason: Error) => void; mode: 'read' | 'compare' | 'detect'; timer: ReturnType<typeof setTimeout> };
 let worker: Worker | null = null;
 let nextId = 1;
 const pending = new Map<number, Pending>();
@@ -36,7 +36,7 @@ function request(rgba: Uint8ClampedArray, w: number, h: number, mode: 'read' | '
     return Promise.reject(new RangeError('OCR image dimensions do not match pixel buffer'));
   }
   const id = nextId++, pixels = rgba.slice();
-  return new Promise<string | { words: Rect[]; lines: Rect[] }>((resolve, reject) => {
+  return new Promise<OCRResult>((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
       reject(Object.assign(new Error('OCR timed out; try a smaller crop'), { code: 'timeout' }));
@@ -59,7 +59,7 @@ export async function detectText(rgba: Uint8ClampedArray, w: number, h: number):
 
 /** Compare preprocessing variants with the bundled Arabic PaddleOCR model. */
 export async function compareText(rgba: Uint8ClampedArray, w: number, h: number): Promise<OCRComparison> {
-  return await request(rgba, w, h, 'compare') as OCRComparison;
+  return await request(rgba, w, h, 'compare') as unknown as OCRComparison;
 }
 
 /** Release the cached model worker when leaving the editor or explicitly resetting OCR. */
