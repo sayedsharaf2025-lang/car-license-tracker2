@@ -40,6 +40,7 @@ const handleMessage = async (e: MessageEvent) => {
       return;
     }
     if (!rec) rec = await ort.InferenceSession.create(new Uint8Array(await bytes('/models/ocr_rec.onnx', 100_000)), { executionProviders: ['wasm'] });
+    const recognizer = rec;
     if (!chars.length) chars = buildChars(new TextDecoder().decode(await bytes('/models/ocr_dict.txt', 500)));
     const d = detPreprocess(rgba, w, h, 1280);
     const dout = await det.run({ [det.inputNames[0]]: new ort.Tensor('float32', d.data, [1, 3, d.dh, d.dw]) });
@@ -52,7 +53,7 @@ const handleMessage = async (e: MessageEvent) => {
       const passes: { name: string; text: string; confidence: number }[] = [];
       const runPass = async (kind: 'original' | 'contrast' | 'binary', name: string) => {
         const input = recPreprocess(rgba, w, h, r, kind);
-        const output = await rec.run({ [rec.inputNames[0]]: new ort.Tensor('float32', input.data, [1, 3, REC_H, input.rw]) });
+        const output = await recognizer.run({ [recognizer.inputNames[0]]: new ort.Tensor('float32', input.data, [1, 3, REC_H, input.rw]) });
         const tensor = output[rec.outputNames[0]], dims = tensor.dims as readonly number[];
         const decoded = ctcDecodeScored(tensor.data as Float32Array, dims[1], dims[2], chars);
         passes.push({ name, text: fixArabicOrder(decoded.text), confidence: decoded.confidence });
