@@ -32,7 +32,7 @@ const handleMessage = async (e: MessageEvent) => {
   try {
     if (!det) det = await ort.InferenceSession.create(new Uint8Array(await bytes('/models/ocr_det.onnx', 100_000)), { executionProviders: ['wasm'] });
     if (mode === 'detect') {
-      const d = detPreprocess(rgba, w, h, 1280);
+      const d = detPreprocess(rgba, w, h, 1600);
       const dout = await det.run({ [det.inputNames[0]]: new ort.Tensor('float32', d.data, [1, 3, d.dh, d.dw]) });
       const words: Rect[] = detBoxes(dout[det.outputNames[0]].data as Float32Array, d.dw, d.dh)
         .map((r) => ({ x0: (r.x0 * w) / d.dw, x1: (r.x1 * w) / d.dw, y0: (r.y0 * h) / d.dh, y1: (r.y1 * h) / d.dh }));
