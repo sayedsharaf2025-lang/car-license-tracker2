@@ -4,7 +4,7 @@ import type { Rect } from './ocrMath.ts';
 // A fresh worker per button press repeatedly downloads/parses large models.
 type OCRComparison = { engine: string; text: string }[];
 type OCRResult = string | OCRComparison | { words: Rect[]; lines: Rect[] };
-type Pending = { resolve: (value: unknown) => void; reject: (reason: Error) => void; mode: 'read' | 'compare' | 'detect'; timer: ReturnType<typeof setTimeout> };
+type Pending = { resolve: (value: OCRResult | PromiseLike<OCRResult>) => void; reject: (reason: Error) => void; mode: 'read' | 'compare' | 'detect'; timer: ReturnType<typeof setTimeout> };
 let worker: Worker | null = null;
 let nextId = 1;
 const pending = new Map<number, Pending>();
