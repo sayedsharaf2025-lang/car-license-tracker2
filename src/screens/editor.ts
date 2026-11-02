@@ -801,13 +801,25 @@ export function editorScreen(): Screen {
     if (!text) { toast(t.font.needText); return; }
     const ranked = await findFonts(p!.rgba, W, sel, text).catch(() => []);
     if (!ranked.length) { toast(t.font.fail, 'error'); return; }
-    fontResults.replaceChildren(h('h2', {}, t.font.results), ...ranked.slice(0, 10).map((r) => {
-      const b = h('button', { class: 'btn secondary result font-result', 'aria-label': t.font.apply + ' ' + r.font, onclick: () => useFont(r.font, text) },
-        h('span', { class: 'font-result-name' }, r.font),
-        h('span', { class: 'font-result-preview', dir: /[\u0600-\u06FF]/.test(text) ? 'rtl' : 'ltr' }, text),
-        h('span', { class: 'font-result-score' }, (r.score < 0.4 ? 'تشابه ضعيف جدًا — ' : r.score < 0.6 ? 'تشابه محدود — ' : 'تشابه أفضل — ') + Math.round(r.score * 100) + '%'));
-      (b.querySelector('.font-result-preview') as HTMLElement).style.fontFamily = '"' + r.font + '", sans-serif'; return b;
-    }), h('p', { class: 'muted' }, 'النتيجة تقيس تشابه شكل الحروف وليست نسبة تأكد قطعية. ' + t.font.note));
+    const sample = cropSel(p!.rgba, W, sel!);
+    const sourceCanvas = document.createElement('canvas');
+    sourceCanvas.width = sample.w; sourceCanvas.height = sample.h;
+    sourceCanvas.className = 'font-source-crop';
+    sourceCanvas.getContext('2d')!.putImageData(new ImageData(sample.crop, sample.w, sample.h), 0, 0);
+    const top = ranked.slice(0, 3);
+    fontResults.replaceChildren(
+      h('h2', {}, 'قارن أفضل 3 ترشيحات'),
+      h('p', { class: 'muted' }, 'العينة الأصلية من الصورة:'),
+      sourceCanvas,
+      ...top.map((r, i) => {
+        const b = h('button', { class: 'btn secondary result font-result', 'aria-label': t.font.apply + ' ' + r.font, onclick: () => useFont(r.font, text) },
+          h('span', { class: 'font-result-name' }, (i + 1) + '. ' + r.font),
+          h('span', { class: 'font-result-preview', dir: /[\\u0600-\\u06FF]/.test(text) ? 'rtl' : 'ltr' }, text),
+          h('span', { class: 'font-result-score' }, 'درجة التشابه: ' + Math.round(r.score * 100) + '/100'));
+        (b.querySelector('.font-result-preview') as HTMLElement).style.fontFamily = '"' + r.font + '", sans-serif';
+        return b;
+      }),
+      h('p', { class: 'muted' }, 'اضغط على الخط لتطبيقه. الدرجة للمقارنة بين الأشكال فقط وليست نسبة تأكد أو ضمانًا أن الخط هو الأصلي. ' + t.font.note));
   }
   function useFont(font: string, text: string) {
     const l = { id: crypto.randomUUID(), text, font, size: 0.09, color: '#ffffff', cx: 0.5, cy: 0.5 };
