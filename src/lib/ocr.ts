@@ -2,7 +2,9 @@ import type { Rect } from './ocrMath.ts';
 
 // Keep one worker alive so ONNX models stay loaded between OCR actions.
 // A fresh worker per button press repeatedly downloads/parses large models.
-type Pending = { resolve: (value: string | { words: Rect[]; lines: Rect[] }) => void; reject: (reason: Error) => void; mode: 'read' | 'detect'; timer: ReturnType<typeof setTimeout> };
+type OCRComparison = { engine: string; text: string }[];
+type OCRResult = string | OCRComparison | { words: Rect[]; lines: Rect[] };
+type Pending = { resolve: (value: OCRResult) => void; reject: (reason: Error) => void; mode: 'read' | 'compare' | 'detect'; timer: ReturnType<typeof setTimeout> };
 let worker: Worker | null = null;
 let nextId = 1;
 const pending = new Map<number, Pending>();
@@ -22,13 +24,14 @@ function getWorker(): Worker {
     pending.delete(id); clearTimeout(item.timer);
     if (e.data?.error) item.reject(Object.assign(new Error(String(e.data.error)), { code: e.data.code ?? 'failed' }));
     else if (item.mode === 'read') item.resolve(String(e.data?.text ?? ''));
+    else if (item.mode === 'compare') item.resolve(Array.isArray(e.data?.candidates) ? e.data.candidates : []);
     else item.resolve({ words: e.data?.words ?? [], lines: e.data?.lines ?? [] });
   };
   instance.onerror = (e) => failAll(Object.assign(new Error(e.message || 'OCR worker failed'), { code: 'failed' }));
   instance.onmessageerror = () => failAll(Object.assign(new Error('Invalid OCR worker response'), { code: 'failed' }));
   return instance;
 }
-function request(rgba: Uint8ClampedArray, w: number, h: number, mode: 'read' | 'detect') {
+function request(rgba: Uint8ClampedArray, w: number, h: number, mode: 'read' | 'compare' | 'detect') {
   if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || rgba.length !== w * h * 4) {
     return Promise.reject(new RangeError('OCR image dimensions do not match pixel buffer'));
   }
@@ -52,6 +55,11 @@ export async function readText(rgba: Uint8ClampedArray, w: number, h: number): P
 /** Finds text areas without reading them. Shares the same warm worker and detector model. */
 export async function detectText(rgba: Uint8ClampedArray, w: number, h: number): Promise<{ words: Rect[]; lines: Rect[] }> {
   return await request(rgba, w, h, 'detect') as { words: Rect[]; lines: Rect[] };
+}
+
+/** Compare preprocessing variants with the bundled Arabic PaddleOCR model. */
+export async function compareText(rgba: Uint8ClampedArray, w: number, h: number): Promise<OCRComparison> {
+  return await request(rgba, w, h, 'compare') as OCRComparison;
 }
 
 /** Release the cached model worker when leaving the editor or explicitly resetting OCR. */
