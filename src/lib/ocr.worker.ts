@@ -47,6 +47,7 @@ const handleMessage = async (e: MessageEvent) => {
     let lines: Rect[] = groupLines(detBoxes(prob, d.dw, d.dh)).map((r) => ({ x0: (r.x0 * w) / d.dw, x1: (r.x1 * w) / d.dw, y0: (r.y0 * h) / d.dh, y1: (r.y1 * h) / d.dh }));
     if (!lines.length) lines = [{ x0: 0, y0: 0, x1: w, y1: h }]; // tight selection: treat it as one line
     const texts: string[] = [];
+    const compareLines: {name:string;text:string;confidence:number}[][] = [];
     for (const r of lines) {
       const passes: { name: string; text: string; confidence: number }[] = [];
       const runPass = async (kind: 'original' | 'contrast' | 'binary', name: string) => {
@@ -62,17 +63,15 @@ const handleMessage = async (e: MessageEvent) => {
       const best = passes.reduce((a, b) => b.confidence > a.confidence ? b : a);
       texts.push(best.text);
       if (mode === 'compare') {
-        const bucket = (globalThis as any).__ocrCompare ??= [];
-        bucket.push(passes);
+        compareLines.push(passes);
       }
     }
     if (mode === 'compare') {
-      const all = (globalThis as any).__ocrCompare as {name:string;text:string;confidence:number}[][];
+      const all = compareLines;
       const candidates = ['الصورة الأصلية','تحسين التباين','الأبيض والأسود'].map(name => ({
         engine: 'PaddleOCR عربي — ' + name,
         text: all.map(line => line.find(x => x.name === name)?.text ?? '').filter(Boolean).join('\\n')
       }));
-      (globalThis as any).__ocrCompare = [];
       post({ id, candidates });
     } else post({ id, text: texts.filter(Boolean).join('\\n') });
   } catch (err) {
