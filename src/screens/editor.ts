@@ -304,6 +304,7 @@ export function editorScreen(): Screen {
   let cloneCanvas: HTMLCanvasElement | null = null, cloneCtx: CanvasRenderingContext2D | null = null;
   let cloneSample: HTMLCanvasElement | null = null, cloneSampleCtx: CanvasRenderingContext2D | null = null;
   let cloneStampCanvas: HTMLCanvasElement | null = null, cloneStampCtx: CanvasRenderingContext2D | null = null;
+  let cloneBrushGradient: CanvasGradient | null = null, cloneBrushKey = '';
   const cloneSourceBtn = h('button', { class: 'btn primary', onclick: () => {
     cloneSource = null; cloneOffset = null; currentSourcePos = null; isCloning = false;
     choosingCloneSource = true; cloneSourceBtn.textContent = 'حدد المصدر على الصورة';
@@ -338,10 +339,10 @@ export function editorScreen(): Screen {
     if (!cloneAligned || !cloneOffset) cloneOffset = { x: (cloneSource.x - pt.x) * sx, y: (cloneSource.y - pt.y) * sy };
     captureHistory(true);
     cloneCanvas = document.createElement('canvas'); cloneCanvas.width = bw; cloneCanvas.height = bh;
-    cloneCtx = cloneCanvas.getContext('2d')!; cloneCtx.drawImage(p!.bitmap, 0, 0);
+    cloneCtx = cloneCanvas.getContext('2d')!; // Transparent retouch layer; original pixels stay untouched until stroke commit.
     cloneSample = document.createElement('canvas'); cloneSample.width = bw; cloneSample.height = bh;
     cloneSampleCtx = cloneSample.getContext('2d')!; cloneSampleCtx.drawImage(p!.bitmap, 0, 0);
-    cloneStampCanvas = document.createElement('canvas'); cloneStampCtx = cloneStampCanvas.getContext('2d')!;
+    cloneStampCanvas = document.createElement('canvas'); cloneStampCtx = cloneStampCanvas.getContext('2d')!; cloneBrushGradient = null; cloneBrushKey = '';
     isCloning = true; paintClone(pt.x, pt.y); return true;
   }
   function paintClone(x: number, y: number) {
@@ -359,10 +360,14 @@ export function editorScreen(): Screen {
     cloneStampCtx.globalCompositeOperation = 'source-over';
     cloneStampCtx.drawImage(cloneSample, cx - r + dx, cy - r + dy, 2 * r, 2 * r, 0, 0, size, size);
     cloneStampCtx.globalCompositeOperation = 'destination-in';
-    const inner = size * 0.5 * cloneHardness;
-    const grad = cloneStampCtx.createRadialGradient(size / 2, size / 2, inner, size / 2, size / 2, size / 2);
-    grad.addColorStop(0, 'rgba(0,0,0,1)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
-    cloneStampCtx.fillStyle = grad; cloneStampCtx.fillRect(0, 0, size, size);
+    const brushKey = size + ':' + cloneHardness;
+    if (!cloneBrushGradient || cloneBrushKey !== brushKey) {
+      const inner = size * 0.5 * cloneHardness;
+      cloneBrushGradient = cloneStampCtx.createRadialGradient(size / 2, size / 2, inner, size / 2, size / 2, size / 2);
+      cloneBrushGradient.addColorStop(0, 'rgba(0,0,0,1)'); cloneBrushGradient.addColorStop(1, 'rgba(0,0,0,0)');
+      cloneBrushKey = brushKey;
+    }
+    cloneStampCtx.fillStyle = cloneBrushGradient; cloneStampCtx.fillRect(0, 0, size, size);
     cloneStampCtx.globalCompositeOperation = 'source-over';
     cloneCtx.save(); cloneCtx.globalAlpha = cloneOpacity;
     cloneCtx.drawImage(cloneStampCanvas, cx - r, cy - r, 2 * r, 2 * r); cloneCtx.restore();
@@ -372,11 +377,15 @@ export function editorScreen(): Screen {
     if (!cloneCanvas || !cloneCtx) { isCloning = false; return; }
     const finished = cloneCanvas;
     try {
-      p!.bitmap = await createImageBitmap(finished); p!.rgba = workingCopy(p!.bitmap).rgba;
+      // Composite the transparent, full-resolution retouch layer only once when the stroke ends.
+      const merged = document.createElement('canvas'); merged.width = p!.bitmap.width; merged.height = p!.bitmap.height;
+      const mergedCtx = merged.getContext('2d')!;
+      mergedCtx.drawImage(p!.bitmap, 0, 0); mergedCtx.drawImage(finished, 0, 0);
+      p!.bitmap = await createImageBitmap(merged); p!.rgba = workingCopy(p!.bitmap).rgba;
       projects.touch(p!); schedule();
     } catch { toast('تعذر تطبيق الاستنساخ', 'error'); }
     isCloning = false; cloneCanvas = cloneSample = cloneStampCanvas = null;
-    cloneCtx = cloneSampleCtx = cloneStampCtx = null; currentSourcePos = null;
+    cloneCtx = cloneSampleCtx = cloneStampCtx = null; cloneBrushGradient = null; cloneBrushKey = ''; currentSourcePos = null;
   }
 
   // --- viewport: zoom/pan changes only the preview, never the photo pixels or export dimensions
@@ -443,7 +452,7 @@ export function editorScreen(): Screen {
     if (cropDrag) { cropMove(pt); return; }
     if (drag && l) { l.cx = pt.x / W + drag.dx; l.cy = pt.y / H + drag.dy; schedule(); return; }
     if (fontDrag && sel) { sel.x1 = Math.max(0, Math.min(W, pt.x)); sel.y1 = Math.max(0, Math.min(H, pt.y)); schedule(); return; }
-    if (tool === 'clone' && last && isCloning) { for (const point of interpolateCloneStroke(last, pt, Math.max(1, radiusPx / 4))) paintClone(point.x, point.y); last = pt; schedule(); return; }
+    if (tool === 'clone' && last && isCloning) { for (const point of interpolateCloneStroke(last, pt, Math.max(2, radiusPx * 0.45))) paintClone(point.x, point.y); last = pt; schedule(); return; }
     if (!last || (tool !== 'obj' && !p.mask)) return;
     const dist = Math.hypot(pt.x - last.x, pt.y - last.y), stepPx = Math.max(1, (radiusPx * pt.k) / 3);
     for (let d = stepPx; d <= dist; d += stepPx) stamp(last.x + ((pt.x - last.x) * d) / dist, last.y + ((pt.y - last.y) * d) / dist, pt.k);
