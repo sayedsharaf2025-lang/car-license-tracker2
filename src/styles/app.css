@@ -91,3 +91,8 @@ input[type="color"] { min-width: var(--tap-min); min-height: var(--tap-min); bor
 .text-size-entry { justify-content: center; }
 .text-size-number { width: 112px; min-height: 42px; padding: 6px 10px; border: 1px solid var(--color-border-input); border-radius: var(--radius-md); background: var(--color-bg); color: var(--color-text); font: inherit; text-align: center; direction: ltr; }
 .text-size-entry .chip { min-width: 42px; font-size: 20px; }
+
+.ocr-compare-results { border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
+.ocr-compare-card { border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3); background: var(--color-surface-raised); }
+.ocr-compare-card strong { display: block; font-size: var(--text-sm); margin-bottom: var(--space-2); }
+.ocr-compare-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
