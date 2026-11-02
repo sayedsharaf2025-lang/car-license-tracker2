@@ -38,10 +38,24 @@ export function detBoxes(prob: Float32Array, w: number, h: number, thresh = 0.3,
 /** Merges boxes that sit on the same text line (words -> lines), top to bottom. */
 export function groupLines(boxes: Rect[]): Rect[] {
   const lines: Rect[] = [];
-  for (const r of [...boxes].sort((a, b) => a.y0 - b.y0)) {
-    const L = lines.find((l) => Math.min(l.y1, r.y1) - Math.max(l.y0, r.y0) > 0.5 * Math.min(l.y1 - l.y0, r.y1 - r.y0));
-    if (L) { L.x0 = Math.min(L.x0, r.x0); L.x1 = Math.max(L.x1, r.x1); L.y0 = Math.min(L.y0, r.y0); L.y1 = Math.max(L.y1, r.y1); }
-    else lines.push({ ...r });
+  for (const r of [...boxes].sort((a, b) => (a.y0 + a.y1) - (b.y0 + b.y1))) {
+    let best: Rect | null = null, bestDistance = Infinity;
+    const rh = Math.max(1, r.y1 - r.y0), rc = (r.y0 + r.y1) / 2;
+    for (const line of lines) {
+      const lh = Math.max(1, line.y1 - line.y0);
+      const overlap = Math.max(0, Math.min(line.y1, r.y1) - Math.max(line.y0, r.y0));
+      const overlapRatio = overlap / Math.max(1, Math.min(lh, rh));
+      const gap = Math.max(0, Math.max(line.y0, r.y0) - Math.min(line.y1, r.y1));
+      const centerDistance = Math.abs((line.y0 + line.y1) / 2 - rc);
+      // Arabic dots/hamza can be detached from their base glyph; attach nearby components
+      // when their vertical distance is small relative to the text height.
+      const sameLine = overlapRatio >= 0.25 || (gap <= 0.55 * Math.max(lh, rh) && centerDistance <= 0.8 * Math.max(lh, rh));
+      if (sameLine && centerDistance < bestDistance) { best = line; bestDistance = centerDistance; }
+    }
+    if (best) {
+      best.x0 = Math.min(best.x0, r.x0); best.x1 = Math.max(best.x1, r.x1);
+      best.y0 = Math.min(best.y0, r.y0); best.y1 = Math.max(best.y1, r.y1);
+    } else lines.push({ ...r });
   }
   return lines.sort((a, b) => a.y0 - b.y0);
 }
