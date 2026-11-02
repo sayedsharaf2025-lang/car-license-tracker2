@@ -390,7 +390,27 @@ export function editorScreen(): Screen {
     cloneCtx.drawImage(cloneStampCanvas, cx - r, cy - r, 2 * r, 2 * r); cloneCtx.restore();
     currentSourcePos = cloneSourcePoint({ x, y }, cloneOffset, sx, sy);
   }
+  // Coalesce high-frequency pointer events into one paint batch per display frame.
+  let clonePaintRaf = 0;
+  let cloneQueuedPoints: { x: number; y: number }[] = [];
+  function queueCloneSegment(from: { x: number; y: number }, to: { x: number; y: number }) {
+    cloneQueuedPoints.push(...interpolateCloneStroke(from, to, Math.max(2, radiusPx * 0.45)));
+    if (clonePaintRaf) return;
+    clonePaintRaf = requestAnimationFrame(() => {
+      clonePaintRaf = 0;
+      const points = cloneQueuedPoints; cloneQueuedPoints = [];
+      for (const point of points) paintClone(point.x, point.y);
+      schedule();
+    });
+  }
+  function flushClonePaint() {
+    if (clonePaintRaf) { cancelAnimationFrame(clonePaintRaf); clonePaintRaf = 0; }
+    const points = cloneQueuedPoints; cloneQueuedPoints = [];
+    for (const point of points) paintClone(point.x, point.y);
+  }
+
   async function finishCloneStroke() {
+    flushClonePaint();
     if (!cloneCanvas || !cloneCtx) { isCloning = false; return; }
     const finished = cloneCanvas;
     try {
@@ -470,7 +490,7 @@ export function editorScreen(): Screen {
     if (cropDrag) { cropMove(pt); return; }
     if (drag && l) { l.cx = pt.x / W + drag.dx; l.cy = pt.y / H + drag.dy; schedule(); return; }
     if (fontDrag && sel) { sel.x1 = Math.max(0, Math.min(W, pt.x)); sel.y1 = Math.max(0, Math.min(H, pt.y)); schedule(); return; }
-    if (tool === 'clone' && last && isCloning) { for (const point of interpolateCloneStroke(last, pt, Math.max(2, radiusPx * 0.45))) paintClone(point.x, point.y); last = pt; schedule(); return; }
+    if (tool === 'clone' && last && isCloning) { queueCloneSegment(last, pt); last = pt; return; }
     if (!last || (tool !== 'obj' && !p.mask)) return;
     const dist = Math.hypot(pt.x - last.x, pt.y - last.y), stepPx = Math.max(1, (radiusPx * pt.k) / 3);
     for (let d = stepPx; d <= dist; d += stepPx) stamp(last.x + ((pt.x - last.x) * d) / dist, last.y + ((pt.y - last.y) * d) / dist, pt.k);
@@ -857,5 +877,5 @@ export function editorScreen(): Screen {
 
   applyView();
   draw();
-  return { el, dispose: () => { job?.cancel(); disposeOCR(); if (raf) cancelAnimationFrame(raf); } };
+  return { el, dispose: () => { job?.cancel(); disposeOCR(); if (raf) cancelAnimationFrame(raf); if (clonePaintRaf) cancelAnimationFrame(clonePaintRaf); cloneQueuedPoints = []; } };
 }
