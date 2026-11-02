@@ -6,7 +6,7 @@ import { compositeCutout, paintBrush, resizeMaskBilinear, thresholdMask, type Br
 import { inpaint } from '../lib/inpaint.ts';
 import { fillHoles, prepareMigan, miganStatus, MiganError, type MiganStage } from '../lib/migan.ts';
 import { findFonts, cropSel, type Sel } from '../lib/fontFinder.ts';
-import { readText, detectText, disposeOCR } from '../lib/ocr.ts';
+import { readText, detectText, compareText, disposeOCR } from '../lib/ocr.ts';
 import { workingCopy } from '../lib/image.ts';
 import { segment, SegmentError } from '../lib/segment.ts';
 import { renderExport, saveFile, shareBlob, formatOfMime, type Format, type Saved } from '../lib/export.ts';
@@ -759,10 +759,30 @@ export function editorScreen(): Screen {
   // --- font finder (S19): select the text area, type what it says, compare with the bundled fonts
   const fontText: HTMLTextAreaElement = h('textarea', { class: 'field', rows: 2, 'aria-label': t.font.input, placeholder: t.font.input });
   const fontResults = h('div', { class: 'results' });
+  const ocrCompareResults = h('div', { class: 'results ocr-compare-results', 'aria-live': 'polite' });
   const fontPanel = h('section', { class: 'sheet', hidden: true },
     h('p', { class: 'muted' }, t.font.hint),
     h('button', { class: 'btn secondary', onclick: () => autoRead() }, t.font.read), fontText,
+    h('button', { class: 'btn secondary', onclick: () => compareOCRSelection() }, 'قارن نتائج OCR'),
+    ocrCompareResults,
     h('button', { class: 'btn primary', onclick: () => searchFont() }, t.font.search), fontResults);
+  async function compareOCRSelection() {
+    if (!sel || Math.abs(sel.x1 - sel.x0) < 8 || Math.abs(sel.y1 - sel.y0) < 8) { toast(t.font.none); return; }
+    overlay.hidden = false; (overlay.firstChild as HTMLElement).textContent = 'جاري مقارنة طرق قراءة النص...';
+    ocrCompareResults.replaceChildren();
+    try {
+      const c = cropSel(p!.rgba, W, sel);
+      const results = await compareText(c.crop, c.w, c.h);
+      ocrCompareResults.replaceChildren(
+        h('h2', {}, 'مقارنة نتائج PaddleOCR العربي'),
+        ...results.map((r) => h('article', { class: 'ocr-compare-card' },
+          h('strong', {}, r.engine),
+          h('p', { dir: 'auto', class: 'ocr-compare-text' }, r.text || 'لم يتم التعرف على نص'))),
+        h('p', { class: 'muted' }, 'مقارنة لثلاث طرق معالجة باستخدام نفس نموذج PaddleOCR، وليست مقارنة بين محركات مستقلة. راجع النص قبل استخدامه.'));
+    } catch (err) {
+      toast((err as { code?: string }).code === 'model_missing' ? t.font.ocrMissing : 'تعذرت مقارنة نتائج OCR', 'error');
+    } finally { overlay.hidden = true; (overlay.firstChild as HTMLElement).textContent = t.editor.working; }
+  }
   async function autoRead() {
     if (!sel || Math.abs(sel.x1 - sel.x0) < 8 || Math.abs(sel.y1 - sel.y0) < 8) { toast(t.font.none); return; }
     overlay.hidden = false; (overlay.firstChild as HTMLElement).textContent = t.font.reading;
