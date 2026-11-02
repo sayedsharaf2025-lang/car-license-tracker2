@@ -54,7 +54,7 @@ const handleMessage = async (e: MessageEvent) => {
       const runPass = async (kind: 'original' | 'contrast' | 'binary', name: string) => {
         const input = recPreprocess(rgba, w, h, r, kind);
         const output = await recognizer.run({ [recognizer.inputNames[0]]: new ort.Tensor('float32', input.data, [1, 3, REC_H, input.rw]) });
-        const tensor = output[rec.outputNames[0]], dims = tensor.dims as readonly number[];
+        const tensor = output[recognizer.outputNames[0]], dims = tensor.dims as readonly number[];
         const decoded = ctcDecodeScored(tensor.data as Float32Array, dims[1], dims[2], chars);
         passes.push({ name, text: fixArabicOrder(decoded.text), confidence: decoded.confidence });
       };
