@@ -28,7 +28,7 @@ async function bytes(path: string, min: number): Promise<ArrayBuffer> {
 }
 
 const handleMessage = async (e: MessageEvent) => {
-  const { id, rgba, w, h, mode } = e.data as { id: number; rgba: Uint8ClampedArray; w: number; h: number; mode?: 'read' | 'detect' };
+  const { id, rgba, w, h, mode } = e.data as { id: number; rgba: Uint8ClampedArray; w: number; h: number; mode?: 'read' | 'compare' | 'detect' };
   try {
     if (!det) det = await ort.InferenceSession.create(new Uint8Array(await bytes('/models/ocr_det.onnx', 100_000)), { executionProviders: ['wasm'] });
     if (mode === 'detect') {
@@ -48,29 +48,33 @@ const handleMessage = async (e: MessageEvent) => {
     if (!lines.length) lines = [{ x0: 0, y0: 0, x1: w, y1: h }]; // tight selection: treat it as one line
     const texts: string[] = [];
     for (const r of lines) {
-      const original = recPreprocess(rgba, w, h, r, 'original');
-      const first = await rec.run({ [rec.inputNames[0]]: new ort.Tensor('float32', original.data, [1, 3, REC_H, original.rw]) });
-      const firstTensor = first[rec.outputNames[0]], firstDims = firstTensor.dims as readonly number[];
-      let best = ctcDecodeScored(firstTensor.data as Float32Array, firstDims[1], firstDims[2], chars);
-      // Retry low-contrast or uncertain lines with a grayscale contrast-normalised view.
-      if (best.confidence < 0.94) {
-        const enhanced = recPreprocess(rgba, w, h, r, 'contrast');
-        const second = await rec.run({ [rec.inputNames[0]]: new ort.Tensor('float32', enhanced.data, [1, 3, REC_H, enhanced.rw]) });
-        const secondTensor = second[rec.outputNames[0]], secondDims = secondTensor.dims as readonly number[];
-        const candidate = ctcDecodeScored(secondTensor.data as Float32Array, secondDims[1], secondDims[2], chars);
-        if (candidate.confidence > best.confidence) best = candidate;
+      const passes: { name: string; text: string; confidence: number }[] = [];
+      const runPass = async (kind: 'original' | 'contrast' | 'binary', name: string) => {
+        const input = recPreprocess(rgba, w, h, r, kind);
+        const output = await rec.run({ [rec.inputNames[0]]: new ort.Tensor('float32', input.data, [1, 3, REC_H, input.rw]) });
+        const tensor = output[rec.outputNames[0]], dims = tensor.dims as readonly number[];
+        const decoded = ctcDecodeScored(tensor.data as Float32Array, dims[1], dims[2], chars);
+        passes.push({ name, text: fixArabicOrder(decoded.text), confidence: decoded.confidence });
+      };
+      await runPass('original', 'الصورة الأصلية');
+      if (mode === 'compare' || passes[0].confidence < 0.94) await runPass('contrast', 'تحسين التباين');
+      if (mode === 'compare' || Math.max(...passes.map(x => x.confidence)) < 0.94) await runPass('binary', 'الأبيض والأسود');
+      const best = passes.reduce((a, b) => b.confidence > a.confidence ? b : a);
+      texts.push(best.text);
+      if (mode === 'compare') {
+        const bucket = (globalThis as any).__ocrCompare ??= [];
+        bucket.push(passes);
       }
-      // A final Otsu-binarized pass can recover low-contrast ink on stained or shaded paper.
-      if (best.confidence < 0.94) {
-        const binary = recPreprocess(rgba, w, h, r, 'binary');
-        const third = await rec.run({ [rec.inputNames[0]]: new ort.Tensor('float32', binary.data, [1, 3, REC_H, binary.rw]) });
-        const thirdTensor = third[rec.outputNames[0]], thirdDims = thirdTensor.dims as readonly number[];
-        const candidate = ctcDecodeScored(thirdTensor.data as Float32Array, thirdDims[1], thirdDims[2], chars);
-        if (candidate.confidence > best.confidence) best = candidate;
-      }
-      texts.push(fixArabicOrder(best.text));
     }
-    post({ id, text: texts.filter(Boolean).join('\n') });
+    if (mode === 'compare') {
+      const all = (globalThis as any).__ocrCompare as {name:string;text:string;confidence:number}[][];
+      const candidates = ['الصورة الأصلية','تحسين التباين','الأبيض والأسود'].map(name => ({
+        engine: 'PaddleOCR عربي — ' + name,
+        text: all.map(line => line.find(x => x.name === name)?.text ?? '').filter(Boolean).join('\\n')
+      }));
+      (globalThis as any).__ocrCompare = [];
+      post({ id, candidates });
+    } else post({ id, text: texts.filter(Boolean).join('\\n') });
   } catch (err) {
     post({ id, error: String(err), code: (err as { code?: string }).code ?? 'failed' });
   }
