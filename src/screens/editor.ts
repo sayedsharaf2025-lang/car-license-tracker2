@@ -637,7 +637,7 @@ export function editorScreen(): Screen {
     overlay.hidden = false; setOverlay(t.font.reading);
     try {
       const c = cropSel(p!.rgba, W, { x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 });
-      const text = (await readText(c.crop, c.w, c.h)).trim();
+      const text = (await readText(c.crop, c.w, c.h)).replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').trim();
       origField.value = text; newField.value = text;
       if (!text) toast(t.font.ocrEmpty);
     } catch (err) { const detail = err instanceof Error ? err.message : String(err); toast((err as { code?: string }).code === 'model_missing' ? `${t.font.ocrMissing} — ${detail}` : t.font.ocrEmpty, 'error'); }
@@ -777,7 +777,7 @@ export function editorScreen(): Screen {
         h('h2', {}, 'مقارنة نتائج PaddleOCR العربي'),
         ...results.map((r) => h('article', { class: 'ocr-compare-card' },
           h('strong', {}, r.engine),
-          h('p', { dir: 'auto', class: 'ocr-compare-text' }, r.text || 'لم يتم التعرف على نص'))),
+          h('p', { dir: 'auto', class: 'ocr-compare-text' }, (r.text || '').replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n') || 'لم يتم التعرف على نص'))),
         h('p', { class: 'muted' }, 'مقارنة لثلاث طرق معالجة باستخدام نفس نموذج PaddleOCR، وليست مقارنة بين محركات مستقلة. راجع النص قبل استخدامه.'));
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err); toast((err as { code?: string }).code === 'model_missing' ? `${t.font.ocrMissing} — ${detail}` : 'تعذرت مقارنة نتائج OCR', 'error');
@@ -804,9 +804,9 @@ export function editorScreen(): Screen {
     fontResults.replaceChildren(h('h2', {}, t.font.results), ...ranked.slice(0, 10).map((r) => {
       const b = h('button', { class: 'btn secondary result font-result', 'aria-label': t.font.apply + ' ' + r.font, onclick: () => useFont(r.font, text) },
         h('span', { class: 'font-result-name' }, r.font),
-        h('span', { class: 'font-result-preview', dir: /[\\u0600-\\u06FF]/.test(text) ? 'rtl' : 'ltr' }, text),
-        h('span', { class: 'font-result-score' }, Math.round(r.score * 100) + '% تشابه'));
-      b.style.fontFamily = '"' + r.font + '", sans-serif'; return b;
+        h('span', { class: 'font-result-preview', dir: /[\u0600-\u06FF]/.test(text) ? 'rtl' : 'ltr' }, text),
+        h('span', { class: 'font-result-score' }, (r.score < 0.4 ? 'تشابه ضعيف جدًا — ' : r.score < 0.6 ? 'تشابه محدود — ' : 'تشابه أفضل — ') + Math.round(r.score * 100) + '%'));
+      (b.querySelector('.font-result-preview') as HTMLElement).style.fontFamily = '"' + r.font + '", sans-serif'; return b;
     }), h('p', { class: 'muted' }, 'النتيجة تقيس تشابه شكل الحروف وليست نسبة تأكد قطعية. ' + t.font.note));
   }
   function useFont(font: string, text: string) {
