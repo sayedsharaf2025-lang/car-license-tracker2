@@ -41,7 +41,7 @@ const handleMessage = async (e: MessageEvent) => {
     }
     if (!rec) rec = await ort.InferenceSession.create(new Uint8Array(await bytes('/models/ocr_rec.onnx', 100_000)), { executionProviders: ['wasm'] });
     const recognizer = rec;
-    if (!chars.length) chars = buildChars(new TextDecoder().decode(await bytes('/models/ocr_dict.txt', 500)));
+    if (!chars.length) chars = buildChars(new TextDecoder().decode(await bytes('/models/ocr_dict.txt', 100)));
     const d = detPreprocess(rgba, w, h, 1280);
     const dout = await det.run({ [det.inputNames[0]]: new ort.Tensor('float32', d.data, [1, 3, d.dh, d.dw]) });
     const prob = dout[det.outputNames[0]].data as Float32Array;
