@@ -75,3 +75,14 @@ test('fixArabicOrder preserves Arabic-Indic and Persian digit runs in mixed Arab
   assert.equal(fixArabicOrder('ab ۱۲ با'), 'اب ۱۲ ab');
   assert.equal(fixArabicOrder('ab +١٢٫٥ با'), 'اب +١٢٫٥ ab');
 });
+
+test('groupLines attaches detached Arabic dots to nearby glyphs but keeps separate baselines', () => {
+  const lines = groupLines([
+    { x0: 30, y0: 12, x1: 48, y1: 27 }, // base glyph
+    { x0: 35, y0: 5, x1: 42, y1: 10 },  // detached dot
+    { x0: 10, y0: 48, x1: 55, y1: 62 }, // next text line
+  ]);
+  assert.equal(lines.length, 2);
+  assert.ok(lines[0].y0 <= 5 && lines[0].y1 >= 27);
+  assert.ok(lines[1].y0 >= 48);
+});
