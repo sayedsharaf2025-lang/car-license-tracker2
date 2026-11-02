@@ -640,7 +640,7 @@ export function editorScreen(): Screen {
       const text = (await readText(c.crop, c.w, c.h)).trim();
       origField.value = text; newField.value = text;
       if (!text) toast(t.font.ocrEmpty);
-    } catch (err) { toast((err as { code?: string }).code === 'model_missing' ? t.font.ocrMissing : t.font.ocrEmpty, 'error'); }
+    } catch (err) { const detail = err instanceof Error ? err.message : String(err); toast((err as { code?: string }).code === 'model_missing' ? `${t.font.ocrMissing} — ${detail}` : t.font.ocrEmpty, 'error'); }
     finally { overlay.hidden = true; setOverlay(t.editor.working); }
   }
 
@@ -780,7 +780,7 @@ export function editorScreen(): Screen {
           h('p', { dir: 'auto', class: 'ocr-compare-text' }, r.text || 'لم يتم التعرف على نص'))),
         h('p', { class: 'muted' }, 'مقارنة لثلاث طرق معالجة باستخدام نفس نموذج PaddleOCR، وليست مقارنة بين محركات مستقلة. راجع النص قبل استخدامه.'));
     } catch (err) {
-      toast((err as { code?: string }).code === 'model_missing' ? t.font.ocrMissing : 'تعذرت مقارنة نتائج OCR', 'error');
+      const detail = err instanceof Error ? err.message : String(err); toast((err as { code?: string }).code === 'model_missing' ? `${t.font.ocrMissing} — ${detail}` : 'تعذرت مقارنة نتائج OCR', 'error');
     } finally { overlay.hidden = true; (overlay.firstChild as HTMLElement).textContent = t.editor.working; }
   }
   async function autoRead() {
