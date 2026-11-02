@@ -58,6 +58,13 @@ jobs:
           cp native/MainActivity.java native/MediaSaverPlugin.java "$DIR"/
           ls "$DIR"
       - run: npx cap sync android
+      - name: Verify OCR models are inside Android assets
+        run: |
+          ASSETS=android/app/src/main/assets/public/models
+          test -s "$ASSETS/ocr_det.onnx"
+          test -s "$ASSETS/ocr_rec.onnx"
+          test -s "$ASSETS/ocr_dict.txt"
+          ls -lh "$ASSETS/ocr_det.onnx" "$ASSETS/ocr_rec.onnx" "$ASSETS/ocr_dict.txt"
       - name: Build debug APK
         run: cd android && chmod +x gradlew && ./gradlew assembleDebug
       - uses: actions/upload-artifact@v6
